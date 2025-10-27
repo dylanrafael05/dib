@@ -1,0 +1,22 @@
+# Ignore all extension-less files
+*
+!/**/
+!*.*
+
+# Ignore all unfinished / testing files
+/MSVC-testing
+/game1
+/dbuilder
+**/Debug
+**/.make
+**/.vs
+**/.vscode
+**/build
+**/x64
+**.vcxproj*
+**.exe
+**.Makefile
+**.sln
+export-libpath.txt
+
+!/src/build
