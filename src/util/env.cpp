@@ -10,7 +10,7 @@ static fs::path initial_path;
 
 void dib::env::initialize(int argc, const char *const *argv)
 {
-    assert(!initialized);
+    ASSERT(!initialized);
 
     ::argc = argc;
     ::argv = argv;
@@ -20,8 +20,8 @@ void dib::env::initialize(int argc, const char *const *argv)
     initialized = true;
 }
 
-int dib::env::argc() {assert(initialized); return ::argc;}
-const char *const *dib::env::argv() {assert(initialized); return ::argv;}
+int dib::env::argc() {ASSERT(initialized); return ::argc;}
+const char *const *dib::env::argv() {ASSERT(initialized); return ::argv;}
 
 #ifdef _WIN32
     #include <windows.h>
@@ -29,7 +29,7 @@ const char *const *dib::env::argv() {assert(initialized); return ::argv;}
 
 fs::path dib::env::executable_path()
 {
-    assert(initialized);
+    ASSERT(initialized);
 
     #ifdef _WIN32
 

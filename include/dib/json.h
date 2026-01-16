@@ -1,14 +1,11 @@
-#ifndef __DIBJSON_H
-#define __DIBJSON_H
+#pragma once
 
 #include <memory>
 #include <vector>
 #include <stack>
 #include <unordered_map>
-#include <exception>
-#include <stdexcept>
 #include <variant>
-
+#include <functional>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -17,10 +14,12 @@
 #include <concepts>
 
 #include "dib/types.h"
-#include "dib/optional.h"
+#include "dib/option.h"
 
 namespace dib::json
 {
+    /// Define the types that can be stored within a json.
+
     using Int = int64_t;
     using Bool = bool;
     using Float = float;
@@ -29,6 +28,11 @@ namespace dib::json
     
     struct Object;
     struct Array;
+
+    /// Define a json::Any type which holds any value that can be stored
+    /// in a json file. To do this, we use a unique_ptr to void with a custom,
+    /// externally defined deleter. This avoids complaints about declaration
+    /// ordering from the compiler.
 
     namespace detail
     {
@@ -65,6 +69,8 @@ namespace dib::json
 
     constexpr static Null null = nullptr;
 
+    /// A json object; a mapping of string keys to arbitrarily typed
+    /// json values.
     struct Object
     {
     private:
@@ -87,6 +93,7 @@ namespace dib::json
         map_t::const_iterator end() const {return values.end();}
     };
 
+    /// A json object; a vector of arbitrarily typed json values.
     struct Array
     {
     private:
@@ -106,65 +113,59 @@ namespace dib::json
         std::vector<Any>::const_iterator end() const {return values.end();}
     };
 
-    enum class JsonError
-    {
-        none,
-        unmatched_object_open,
-        unmatched_array_open,
-        unterminated_string,
-        unknown_character,
-        unexpected_character,
-        unmatched_object_key,
-        invalid_key
-    };
-
-    JsonError read(std::istream &stream, Any &output);
-
-    // TODO: handle escaped strings //
-
-    class JsonException : public std::runtime_error
-    {
-        using std::runtime_error::runtime_error;
-    };
-    
-    class JsonReadException : public std::runtime_error
-    {
-        using std::runtime_error::runtime_error;
-    };
-
+    /// Forward declare json reader and writer to help in definition
+    /// of JsonInterface.
     class JsonWriter;
     class JsonReader;
 
+    /// The interface used to seiralize custom types to and from json.
     template<class T>
     struct JsonInterface
     {
         static void write(JsonWriter &writer, const T &value);
         static void read(JsonReader &reader, T &value);
 
-        using is_default = void;
+        using IsDefault = void;
     };
 
+    /// A marker type used to denote that this type declares its own
+    /// json interface. This entails either the definition of a member
+    /// void handle_json(Json &), or the definition of two members:
+    /// void write_to_json(JsonWriter &) const, void read_from_json(JsonReader &)
     struct ProvidedJsonInterface : types::Marker<ProvidedJsonInterface> {};
 
+    /// A concept which checks if a type has a custom implementation of
+    /// JsonInterface.
     template<class T>
-    concept has_custom_write = !requires 
-    {
-        typename JsonInterface<T>::is_default;
-    };
+    concept HasCustomInterface = 
+        !requires 
+        {
+            typename JsonInterface<T>::IsDefault;
+        }
+        && requires(JsonWriter &writer, JsonReader &reader, const T &cv, T &v)
+        {
+            { JsonInterface<T>::write(writer, cv) } -> types::IsVoid;
+            { JsonInterface<T>::read(reader, v) } -> types::IsVoid;
+        };
 
+    /// Check if the given type qualifies as a collection for the purposes
+    /// of json manipulation.
     template<class T>
-    concept collection = requires(const T &value, size_t i)
+    concept IsCollection = requires(const T &value, size_t i)
     {
         {value.begin()} -> std::input_iterator;
         {value.end()} -> std::equality_comparable_with<decltype(value.begin())>;
         typename T::value_type;
     };
     
+    /// Check if the given type qualifies as a map for the purposes
+    /// of json manipulation.
     template<class T>
-    concept maplike_collection = requires(const T &value, size_t i)
+    concept IsMaplikeCollection = requires(const T &value, size_t i)
     {
         {value.begin()} -> std::input_iterator;
         {value.begin()->first} -> std::convertible_to<std::string_view>;
+        value.begin()->second;
         {value.end()} -> std::equality_comparable_with<decltype(value.begin())>;
         typename T::value_type;
     };
@@ -218,7 +219,7 @@ namespace dib::json
             return *this;
         }
 
-        template<has_custom_write T>
+        template<HasCustomInterface T>
         JsonReader &read(T &value)
         {
             if constexpr (requires{ JsonInterface<T>::read(*this, value); })
@@ -230,7 +231,7 @@ namespace dib::json
             return *this;
         }
 
-        template<collection T> requires (!maplike_collection<T>)
+        template<IsCollection T> requires (!IsMaplikeCollection<T>)
         JsonReader &read(T &value)
         {
             using X = typename T::value_type;
@@ -248,7 +249,7 @@ namespace dib::json
             return *this;
         }
         
-        template<maplike_collection T>
+        template<IsMaplikeCollection T>
         JsonReader &read(T &value)
         {
             using X = typename T::value_type;
@@ -262,7 +263,7 @@ namespace dib::json
                 X val = X();
                 read(val);
 
-                value[std::move(key)] = val;
+                value[MOVE(key)] = val;
             }
             read_end_object();
 
@@ -341,7 +342,7 @@ namespace dib::json
         JsonWriter &write(const Array &);
         JsonWriter &write(const Any &);
 
-        template<has_custom_write T>
+        template<HasCustomInterface T>
         JsonWriter &write(const T &value)
         {
             if constexpr (requires{ JsonInterface<T>::write(*this, value); })
@@ -395,7 +396,7 @@ namespace dib::json
         }
 
         // Wrappers for containers //
-        template<collection T> requires (!maplike_collection<T>)
+        template<IsCollection T> requires (!IsMaplikeCollection<T>)
         JsonWriter &write(const T &collection)
         {
             write_start_array();
@@ -407,7 +408,7 @@ namespace dib::json
             return *this;
         }
         
-        template<maplike_collection T>
+        template<IsMaplikeCollection T>
         JsonWriter &write(const T &collection)
         {
             write_start_object();
@@ -421,6 +422,22 @@ namespace dib::json
         }
     };
 
+    static inline void read(std::istream &stream, json::Any &any)
+    {
+        json::JsonReader jreader(stream);
+        jreader.read(any);
+    }
+    
+    static inline void write(std::ostream &stream, const json::Any &any)
+    {
+        json::JsonWriter jwriter(stream);
+        jwriter.write(any);
+    }
+
+    /// Either a json reader or a json writer;
+    /// this class should be used as the primary entrypoint for serializing datatypes,
+    /// as it allows for easily merging writing and reading operations into one function,
+    /// as well as fine-control for both writing and reading seperately if desired.
     class Json
     {
         std::variant<JsonReader *, JsonWriter *> inner;
@@ -433,6 +450,9 @@ namespace dib::json
         bool is_reader() const { return inner.index() == 0; }
         bool is_writer() const { return inner.index() == 1; }
 
+        /// Split execution into read and write modes, where the first argument
+        /// is a lambda called with the reader and the second is a lambda
+        /// called with the writer.
         Json &visit(auto &&read, auto &&write)
         {
             if (is_reader()) std::invoke(read, *std::get<0>(inner));
@@ -441,6 +461,7 @@ namespace dib::json
             return *this;
         }
 
+        /// Read or write a key from the json.
         Json &key(auto &&key)
         {
             return visit(
@@ -449,6 +470,7 @@ namespace dib::json
             );
         }
 
+        /// Read or write a value to the json.
         Json &val(auto &&val)
         {
             return visit(
@@ -457,6 +479,8 @@ namespace dib::json
             );
         }
 
+        /// Read or write a value to the json, using the provided 'encode' and 'decode'
+        /// functions to convert to and from a representative object before serializing.
         Json &val(auto &&val, auto &&decode, auto &&encode)
         {
             using T = std::remove_cvref_t<decltype(encode(val))>;
@@ -467,6 +491,7 @@ namespace dib::json
             );
         }
 
+        /// Read or write a key and its associated value.
         Json &kvp(auto &&key, auto &&val)
         {
             return visit(
@@ -475,6 +500,8 @@ namespace dib::json
             );
         }
 
+        /// Read or write a key, then split control into a lambda for reading the associated value
+        /// and a lambda for writing the associated value.
         Json &kvp(auto &&key, auto &&read, auto &&write)
         {
             visit(
@@ -482,9 +509,11 @@ namespace dib::json
                 [&](JsonWriter &js) { js.write_key(key); }
             );
 
-            return visit(DIB_FWD(read), DIB_FWD(write));
+            return visit(FORWARD(read), FORWARD(write));
         }
 
+        /// Read or write a key and its associated value, using the provided 'encode' and 'decode'
+        /// functions to convert to and from a representative object before serializing.
         Json &kvp(auto &&key, auto &&val, auto &&encode, auto &&decode)
         {
             visit(
@@ -492,12 +521,16 @@ namespace dib::json
                 [&](JsonWriter &js) { js.write_key(key); }
             );
 
-            return this->val(val, DIB_FWD(encode), DIB_FWD(decode));
+            return this->val(val, FORWARD(encode), FORWARD(decode));
         }
 
+        /// Call the provided lambda for every element in the list-style container when writing
+        /// or for every element in the json when reading.
         Json &list(auto &&l, auto &&each)
         {
             return visit(
+                // When reading; read the start array, then apply the lambda to each element 
+                // in the json before reading in the end of the array.
                 [&](JsonReader &js) { 
                     js.read_start_array();
                     while (!js.at_close_array())
@@ -506,11 +539,14 @@ namespace dib::json
                         each(*this, elem);
 
                         if constexpr(requires { l.push_back(elem); }) l.push_back(elem);
-                        else if constexpr (requires { l.insert(l.end(), elem); }) l.push_back(elem);
+                        else if constexpr (requires { l.insert(l.end(), elem); }) l.insert(l.end(), elem);
                         else if constexpr (requires { l.insert(elem); }) l.insert(elem);
                     }
                     js.read_end_array();
                 },
+
+                // When writing; write the start array, then apply the lambda to each element 
+                // in the list before writing the end of array.
                 [&](JsonWriter &js) { 
                     js.write_start_array();
                     for (auto &elem : l)
@@ -522,9 +558,16 @@ namespace dib::json
             );
         }
 
+        /// Call the provided lambda for every element in the json-map-style container when writing
+        /// or for every element in the json when reading. A json-map-style container is a container
+        /// which can be iterated over to produce std::pair<(string-like), T>. The provided 'each'
+        /// function is only called on the *values* of the map; the keys are always read in as 
+        /// strings.
         Json &map(auto &&m, auto &&each)
         {
             return visit(
+                // When reading, read the start and repeatedly read the key and value pairs
+                // until exhausted, calling 'each' on the value only.
                 [&](JsonReader &js) {
                     js.read_start_object();
                     while (!js.at_close_object())
@@ -535,10 +578,13 @@ namespace dib::json
                         js.read_key(key);
                         each(*this, elem);
 
-                        m[std::move(key)] = std::move(elem);
+                        m[MOVE(key)] = MOVE(elem);
                     }
                     js.read_end_object();
                 },
+                
+                // When writing, write the start and repeatedly write the key and value pairs
+                // until exhausted, calling 'each' on the value only.
                 [&](JsonWriter &js) {
                     js.write_start_object();
                     for (auto &[key, elem] : m)
@@ -551,16 +597,19 @@ namespace dib::json
             );
         }
 
+        /// Delegate to reading or writing as appropriate for the following.
         Json &start_array() { return visit(&JsonReader::read_start_array, &JsonWriter::write_start_array); }
         Json &start_object() { return visit(&JsonReader::read_start_object, &JsonWriter::write_start_object); }
 
         Json &end_array() { return visit(&JsonReader::read_end_array, &JsonWriter::write_end_array); }
         Json &end_object() { return visit(&JsonReader::read_end_object, &JsonWriter::write_end_object); }
 
-        auto as_reader() { return is_reader() ? dib::Optional<JsonReader &>(*std::get<0>(inner)) : dib::none; }
-        auto as_writer() { return is_writer() ? dib::Optional<JsonWriter &>(*std::get<1>(inner)) : dib::none; }
+        auto as_reader() { return is_reader() ? dib::option::Option<JsonReader &>(*std::get<0>(inner)) : dib::option::none; }
+        auto as_writer() { return is_writer() ? dib::option::Option<JsonWriter &>(*std::get<1>(inner)) : dib::option::none; }
     };
     
+    /// Supply the default implementations of JsonInterface<T>::write and JsonInterface<T>::read.
+
     template<class T>
     void JsonInterface<T>::write(JsonWriter &writer, const T &value)
     {
@@ -573,6 +622,9 @@ namespace dib::json
         reader.read(value);
     }
 
+    /// Override the json interface for types which supply it as member functions.
+    /// These types are required to either have a member .handle_json(Json &)
+    /// or two members .write_to_json(JsonWriter &) const and .read_from_json(JsonReader &).
     template<std::derived_from<ProvidedJsonInterface> Type>
     struct JsonInterface<Type>
     {
@@ -595,21 +647,22 @@ namespace dib::json
         }
     };
 
+    /// Override the json interface for the option type.
     template<class Type>
-    struct JsonInterface<dib::Optional<Type>>
+    struct JsonInterface<dib::option::Option<Type>>
     {
-        static void write(JsonWriter &writer, const dib::Optional<Type> &value)
+        static void write(JsonWriter &writer, const dib::option::Option<Type> &value)
         {
             if (value) writer.write(*value);
             else writer.write(null);
         }
 
-        static void read(JsonReader &reader, dib::Optional<Type> &value)
+        static void read(JsonReader &reader, dib::option::Option<Type> &value)
         {
             if (reader.at_null())
             {
-                Null n = null; reader.read(n);
-                value = dib::none;
+                Null n = null; reader.read_null();
+                value = dib::option::none;
             }
             else
             {
@@ -619,9 +672,10 @@ namespace dib::json
         }
     };
 
-    // Case-wise values; helper class //
+    /// Case-wise values; helper class
+    /// Use this class to assist in the serialization of enumeration classes.
     template<class T>
-    class CaseHelper
+    class EnumHelper
     {
     public:
         struct Reader
@@ -648,7 +702,7 @@ namespace dib::json
 
             void throw_impl(const std::string_view &msg)
             {
-                throw JsonReadException{ msg.data() };
+                RUNTIME_ERROR(std::format("Error reading json: {}", msg));
             }
         };
 
@@ -674,7 +728,7 @@ namespace dib::json
 
             void throw_impl(const std::string_view &msg)
             {
-                throw JsonException{ msg.data() };
+                RUNTIME_ERROR(std::format("Error writing json: {}", msg));
             }
         };
 
@@ -683,19 +737,19 @@ namespace dib::json
         var_t val;
 
     public:
-        CaseHelper(JsonReader &js, T &val)
+        EnumHelper(JsonReader &js, T &val)
             : val(Reader{js, val})
         {}
 
-        CaseHelper(JsonWriter &js, const T &val)
+        EnumHelper(JsonWriter &js, const T &val)
             : val(Writer{ js, val })
         {}
 
-        CaseHelper(Json &js, T &val)
-            : val(js.is_reader() ? var_t(Reader{ *js.as_reader(), val}) : var_t(Writer{ *js.as_writer(), val }))
+        EnumHelper(Json &js, T &val)
+            : val(js.is_reader() ? var_t(Reader{ js.as_reader().unwrap(), val}) : var_t(Writer{ js.as_writer().unwrap(), val }))
         {}
 
-        CaseHelper &let(const std::string_view &key, const T &target)
+        EnumHelper &let(const std::string_view &key, const T &target)
         {
             std::visit([&](auto &impl) {impl.let_impl(key, target);}, val);
             return *this;
@@ -713,23 +767,20 @@ namespace dib::json
     };
 
     template<class T>
-    CaseHelper<T> case_helper(JsonReader &js, T &value)
+    EnumHelper<T> enum_helper(JsonReader &js, T &value)
     {
-        return CaseHelper<T>{ js, value };
-    }
-
-    // Case-wise writing; write helper //
-    template<class T>
-    CaseHelper<T> case_helper(JsonWriter &js, const T &value)
-    {
-        return CaseHelper<T>{ js, value };
+        return EnumHelper<T>{ js, value };
     }
 
     template<class T>
-    CaseHelper<T> case_helper(Json &js, T &value)
+    EnumHelper<T> enum_helper(JsonWriter &js, const T &value)
     {
-        return CaseHelper<T>{ js, value };
+        return EnumHelper<T>{ js, value };
+    }
+
+    template<class T>
+    EnumHelper<T> enum_helper(Json &js, T &value)
+    {
+        return EnumHelper<T>{ js, value };
     }
 }
-
-#endif

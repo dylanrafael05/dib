@@ -2,14 +2,14 @@
 #define __DIBAPP_PLUGINS_CONCEPTS_H
 
 #include "../app.fwd.h"
-#include <concepts>
+#include "dib/types.h"
 
 namespace dib::plugins
 {
     template<class T>
-    concept plugin = requires(dib::app::App &app, const T &value)
+    concept IsPlugin = requires(dib::app::App &app, const T &value)
     {
-        {value.inject(app)} -> std::same_as<void>;
+        {value.inject(app)} -> types::IsVoid;
         std::is_default_constructible_v<T>;
     };
 }

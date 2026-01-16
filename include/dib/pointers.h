@@ -1,8 +1,8 @@
-#ifndef __POINTERS_H
-#define __POINTERS_H
+#pragma once
 
-#include <utility>
 #include <memory>
+
+#include "dib/debug.h"
 
 namespace dib
 {
@@ -24,11 +24,11 @@ namespace dib
         bool has_value() const { return _ptr; }
         T *get() const { return _ptr; }
 
-        T &operator*() { return *_ptr; }
-        const T &operator*() const { return *_ptr; }
+        T &operator*() { if(!_ptr) RUNTIME_ERROR("Null pointer dereference"); return *_ptr; }
+        const T &operator*() const { if(!_ptr) RUNTIME_ERROR("Null pointer dereference"); return *_ptr; }
 
-        T *operator->() { return _ptr; }
-        const T *operator->() const { return _ptr; }
+        T *operator->() { if(!_ptr) RUNTIME_ERROR("Null pointer dereference"); return _ptr; }
+        const T *operator->() const { if(!_ptr) RUNTIME_ERROR("Null pointer dereference"); return _ptr; }
 
         auto operator==(const BorrowedPtr<T> &other) const { return _ptr == other._ptr; }
         auto operator<=>(const BorrowedPtr<T> &other) const { return _ptr <=> other._ptr; }
@@ -45,5 +45,3 @@ namespace std
         }
     };
 }
-
-#endif

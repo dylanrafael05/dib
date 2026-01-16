@@ -1,4 +1,5 @@
 #include "dib/ecs/systems.h"
+#include "dib/debug.h"
 #include "dib/ecs/world.h"
 
 #include <numeric>
@@ -9,18 +10,18 @@ using namespace dib::ecs;
 // Systems //
 void System::execute(const Systems &scheduler, World &world) const
 {
-	if (pred && !pred(scheduler, world)) [[unlikely]]
+	if (pred && !pred()) [[unlikely]]
 		return;
 
-	init(scheduler, world);
+	init();
 	std::visit(
-		functional::overload{
-			[&](const SystemFn &fn) { fn(scheduler, world); },
+		functional::Overload{
+			[&](const SystemFn &fn) { fn(); },
 			[&](const SystemGroup &group) { scheduler.execute(world, group); }
 		},
 		action
 	);
-	deinit(scheduler, world);
+	deinit();
 }
 
 // SystemScheduler //
@@ -28,17 +29,16 @@ void Systems::add(System &&sys)
 {
 	if (_built)
 	{
-		std::cerr << "Calls to SystemScheduler::add_system() must be performed before calling SystemScheduler::build().\n";
-		std::abort();
+		RUNTIME_ERROR("Calls to SystemScheduler::add_system() must be performed before calling SystemScheduler::build().");
 	}
 
-	auto ptr = std::make_unique<System>(std::move(sys));
+	auto ptr = std::make_unique<System>(MOVE(sys));
 	auto grp = ptr->group;
 	auto act = ptr->action;
 
-	auto &grp_inst = _groups[ptr->group];
+	auto &grp_inst = _groups[grp];
 
-	grp_inst._system_map.insert({ act, std::move(ptr) });
+	grp_inst._system_map.insert({ act, MOVE(ptr) });
 	grp_inst._system_list.push_back(grp_inst._system_map.at(act));
 }
 
@@ -46,8 +46,7 @@ void Systems::add(const std::initializer_list<System> &systems)
 {
 	if (_built)
 	{
-		std::cerr << "Calls to SystemScheduler::add_systems() must be performed before calling SystemScheduler::build().\n";
-		std::abort();
+		RUNTIME_ERROR("Calls to SystemScheduler::add_systems() must be performed before calling SystemScheduler::build().");
 	}
 
 	for (auto &s_ref : systems)
@@ -67,8 +66,9 @@ void Systems::build()
 	{
 		if (sys.order_state == System::ConstructionState::in_progress)
 		{
-			std::cerr << "Recursive ordering detected.\n";
-			std::abort();
+			RUNTIME_ERROR("Recursive ordering detected.");
+			// TODO: make it so calling .add_system takes in a source_location defaulted to ::current,
+			// then report that source location here to make this error less vague!
 		}
 		else if (sys.order_state == System::ConstructionState::completed)
 		{
@@ -98,8 +98,7 @@ void Systems::build()
 
 		if (min > max)
 		{
-			std::cerr << "Impossible ordering detected.\n";
-			std::abort();
+			RUNTIME_ERROR("Impossible ordering detected.");
 		}
 
 		sys.order = std::midpoint(min, max);
@@ -123,8 +122,7 @@ void Systems::execute(World &world, SystemGroup group_id) const
 {
 	if (!_built)
 	{
-		std::cerr << "Calls to SystemScheduler::execute() must be performed after calling SystemScheduler::build().\n";
-		std::abort();
+		RUNTIME_ERROR("Calls to SystemScheduler::execute() must be performed after calling SystemScheduler::build().");
 	}
 
 	if (!_groups.contains(group_id))

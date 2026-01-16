@@ -69,7 +69,7 @@ void Project::load(const fs::path &dir)
 
     // Load configuration //
     json::Any config_raw;
-    if((bool)json::read(config_file, config_raw)) LOAD_ERR;
+    json::read(config_file, config_raw);
 
     auto config = config_raw.as_object();
     if(!config) LOAD_ERR;
@@ -156,7 +156,7 @@ void Module::load_configuration()
     std::ifstream config_file(this->config_file());
 
     json::Any config_raw;
-    if((bool)json::read(config_file, config_raw)) LOAD_ERR;
+    json::read(config_file, config_raw);
 
     auto config = config_raw.as_object();
     if(!config) LOAD_ERR;

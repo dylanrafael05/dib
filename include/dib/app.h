@@ -1,38 +1,35 @@
-#ifndef __DIB_ECS_APP_H
-#define __DIB_ECS_APP_H
+#pragma once
 
+#include <stddef.h>
+
+#include "dib/conststring.h"
+#include "dib/resources.h"
+#include "dib/plugins/concept.h"
+#include "dib/ecs/components.h"
+#include "dib/ecs/singletons.h"
+#include "dib/ecs/state_machine.h"
 #include "dib/ecs/world.h"
 #include "dib/ecs/systems.h"
-
-#include <source_location>
-#include <stddef.h>
-#include <span>
-#include <vector>
-
-#include "conststring.h"
-#include "function_util.h"
-#include "resources.h"
-#include "plugins/concept.h"
-#include "io/os.h"
+#include "dib/app.fwd.h"
 
 // Module helper functions //
 #define __dibapp_eval(x) x
 
 #define __file_line_col __FILE__, __LINE__
 #define __on_app_load \
-    void __on_app_load__(::dib::app::unique_identifier<__file_line_col>); \
-    template<> const char ::dib::app::unique_identifier<__file_line_col>::value = []{ \
-        __on_app_load__(::dib::app::unique_identifier<__file_line_col>{}); \
+    void __on_app_load__(::dib::app::UniqueIdentifier<__file_line_col>); \
+    template<> const char ::dib::app::UniqueIdentifier<__file_line_col>::value = []{ \
+        __on_app_load__(::dib::app::UniqueIdentifier<__file_line_col>{}); \
         return 0; \
     }(); \
-    void __on_app_load__(::dib::app::unique_identifier<__file_line_col>)
+    void __on_app_load__(::dib::app::UniqueIdentifier<__file_line_col>)
 
 #define on_app_load __dibapp_eval(__on_app_load)
 
 namespace dib::app
 {
-    template<dib::strings::string_const, uint_least32_t>
-    struct unique_identifier
+    template<dib::strings::StringConst, uint_least32_t>
+    struct UniqueIdentifier
     {
         static const char value;
     };
@@ -45,8 +42,10 @@ namespace dib::app
 
     namespace detail
     {
-        std::unique_ptr<dib::resources::Resources> get_resource_manager(bool use_batch);
+        std::unique_ptr<dib::resources::ResourceStore> get_resource_manager(bool use_batch);
     }
+    
+    App &this_app();
 
     class App
     {
@@ -67,30 +66,44 @@ namespace dib::app
 
         void init_resource_manager()
         {
-            world().set_resource_manager(detail::get_resource_manager(use_batch));
+            world().resources().set_store(detail::get_resource_manager(use_batch));
         }
 
-        friend App &instance();
+        friend App &dib::app::this_app();
 
     public:
         ecs::Systems &systems() { return _sys_scheduler; }
         const ecs::Systems &systems() const { return _sys_scheduler; }
+        
         ecs::World &world() { return _world; }
         const ecs::World &world() const { return _world; }
+
+        ecs::Entities &entities() { return _world.entities(); }
+        const ecs::Entities &entities() const { return _world.entities(); }
+        ecs::Singletons &singletons() { return _world.singletons(); }
+        const ecs::Singletons &singletons() const { return _world.singletons(); }
+        ecs::Messages &messages() { return _world.messages(); }
+        const ecs::Messages &messages() const { return _world.messages(); }
+        ecs::StateMachine &state_machine() { return _world.state_machine(); }
+        const ecs::StateMachine &state_machine() const { return _world.state_machine(); }
+        ecs::Commands &commands() { return _world.commands(); }
+        const ecs::Commands &commands() const { return _world.commands(); }
+        resources::Resources &resources() { return _world.resources(); }
+        const resources::Resources &resources() const { return _world.resources(); }
 
         App &set_fps(float target_fps);
         App &set_title(const std::string &title);
         App &set_dimensions(int width, int height);
         App &initialize(int argc, const char *const *argv);
 
-        template<dib::plugins::plugin Plugin>
+        template<dib::plugins::IsPlugin Plugin>
         App &inject(Plugin &&plug)
         {
             plug.inject(*this);
             return *this;
         }
 
-        template<dib::plugins::plugin Plugin>
+        template<dib::plugins::IsPlugin Plugin>
         App &inject()
         {
             return inject(Plugin());
@@ -98,8 +111,4 @@ namespace dib::app
 
         void run();
     };
-
-    App &instance();
 }
-
-#endif

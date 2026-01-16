@@ -1,12 +1,12 @@
-#ifndef __DIB_ECS_SINGLETONS_H
-#define __DIB_ECS_SINGLETONS_H
+#pragma once
 
 #include <unordered_map>
-#include <typeinfo>
 #include <typeindex>
-#include <optional>
 
-#include "../raw_memory.h"
+#include "dib/raw_memory.h"
+#include "dib/option.h"
+#include "dib/debug.h"
+#include "dib/preprocess.h"
 
 namespace dib::ecs
 {
@@ -19,7 +19,7 @@ namespace dib::ecs
             if (singletons.count({ typeid(T) }) > 0)
                 return *this;
 
-            singletons[{typeid(T)}] = T(std::forward<Args>(args)...);
+            singletons[{typeid(T)}] = T(FORWARD(args)...);
             return *this;
         }
 
@@ -29,20 +29,17 @@ namespace dib::ecs
             if (singletons.count({ typeid(T) }) != 0)
                 return get<T>();
 
-            create<T>(std::forward<Args>(args)...);
+            create<T>(FORWARD(args)...);
             return get<T>();
         }
 
         template<class T>
         T &get()
         {
-            #ifndef NDEBUG
             if (singletons.count({ typeid(T) }) == 0)
             {
-                std::cerr << "Attempted to get a singleton which does not exist." << std::endl;
-                std::abort();
+                RUNTIME_ERROR("Attempt to get a singleton which does not exist.");
             }
-            #endif
 
             return singletons[{typeid(T)}].template get<T>();
         }
@@ -67,7 +64,7 @@ namespace dib::ecs
         void send(T &&message)
         {
             initialize_storage<T>();
-            messages.at(typeid(T)).emplace_back<T>(std::move(message));
+            messages.at(typeid(T)).emplace_back<T>(MOVE(message));
         }
 
         template<class T>
@@ -77,21 +74,21 @@ namespace dib::ecs
         }
 
         template<class T>
-        std::optional<T> get()
+        dib::option::Option<T> get()
         {
             // Early exit for empty queue //
-            if (!messages.contains(typeid(T))) return std::nullopt;
+            if (!messages.contains(typeid(T))) return dib::option::none;
             auto &stack = messages.at(typeid(T));
 
             // Early exit for empty queue //
-            if (stack.size() == 0) return std::nullopt;
+            if (stack.size() == 0) return dib::option::none;
 
             T &element = stack.get<T>(stack.size() - 1);
-            T ret = std::move(element);
+            T ret = MOVE(element);
 
             stack.pop_back();
 
-            return { std::move(ret) };
+            return { MOVE(ret) };
         }
 
     private:
@@ -105,5 +102,3 @@ namespace dib::ecs
         std::unordered_map<std::type_index, dib::structures::ErasedVec> messages;
     };
 }
-
-#endif

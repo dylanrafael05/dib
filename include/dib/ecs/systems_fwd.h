@@ -1,5 +1,4 @@
-#ifndef __DIB_ECS_SYSTEMS_FWD_H
-#define __DIB_ECS_SYSTEMS_FWD_H
+#pragma once
 
 #include "dib/types.h"
 
@@ -145,5 +144,3 @@ namespace dib::ecs
 	struct Systems;
 	struct System;
 }
-
-#endif

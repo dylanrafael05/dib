@@ -94,7 +94,7 @@ namespace dib::project
 
         const Module &module(const std::string &name) const {return *(_by_name.at(name));}
         const Module &module(const std::string_view &name) const {return *(_by_name.at(std::string(name)));}
-        const Module &module(const dib::strings::string_literal &name) const {return *(_by_name.at(std::string(name)));}
+        const Module &module(const dib::strings::StringLiteral &name) const {return *(_by_name.at(std::string(name)));}
         
         std::span<const std::unique_ptr<Module>> modules() const {return _modules;}
 

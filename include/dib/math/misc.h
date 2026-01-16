@@ -1,13 +1,13 @@
-#ifndef __DIBMATH_MISC_H
-#define __DIBMATH_MISC_H
+#pragma once
 
 #include <cmath>
+
 #include "concept.h"
 #include "raylib.h"
 
 namespace dib::math
 {   
-    template<concepts::lerpable T>
+    template<concepts::IsLerpable T>
     constexpr T lerp(T start, T end, float t)
     {
         if(t == 0) return start;
@@ -29,13 +29,13 @@ namespace dib::math
         };
     }
 
-    template<concepts::real T>
+    template<concepts::IsReal T>
     constexpr float invlerp(T value, T start, T end)
     {
         return static_cast<float>((value - start) / (end - start));
     } 
 
-    template<concepts::arithmetic T>
+    template<concepts::IsArithmetic T>
     constexpr int sign(T value)
     {
         if(value > (T)0)
@@ -47,21 +47,21 @@ namespace dib::math
         return 0;
     }
 
-    template<concepts::arithmetic T>
+    template<concepts::IsArithmetic T>
     constexpr T max(T a, T b)
     {
         if(a > b) return a;
         return b;
     }
 
-    template<concepts::arithmetic T>
+    template<concepts::IsArithmetic T>
     constexpr T min(T a, T b)
     {
         if(a < b) return a;
         return b;
     }
 
-    template<concepts::arithmetic T> 
+    template<concepts::IsArithmetic T> 
     constexpr T clamp(T a, T min = (T)0, T max = (T)1)
     {
         if(a < min) return min;
@@ -70,19 +70,19 @@ namespace dib::math
         return a;
     }
     
-    template<concepts::real T>
+    template<concepts::IsReal T>
     constexpr T fract(T value)
     {
         return value - (T)floor((double)value);
     }
 
-    template<concepts::arithmetic T>
+    template<concepts::IsArithmetic T>
     constexpr T abs(T value)
     {
         return value > 0 ? value : -value;
     }
     
-    template<concepts::real T>
+    template<concepts::IsReal T>
     constexpr T smoothstep(T start, T end, float value)
     {
         auto value2 = value * value;
@@ -123,5 +123,3 @@ namespace dib::math
         float randomize(float x);
     }
 }
-
-#endif

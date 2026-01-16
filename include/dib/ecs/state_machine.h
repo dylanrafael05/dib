@@ -1,15 +1,14 @@
-#ifndef __DIB_ECS_STATE_MACHINE_H
-#define __DIB_ECS_STATE_MACHINE_H
+#pragma once
 
 #include <any>
 #include <unordered_map>
 #include <queue>
-#include <typeinfo>
 #include <typeindex>
-#include <iostream>
 
 #include "dib/ecs/world_fwd.h"
 #include "dib/ecs/systems_fwd.h"
+#include "dib/debug.h"
+#include "dib/types.h"
 
 namespace dib::ecs
 {
@@ -48,8 +47,7 @@ namespace dib::ecs
 		{
 			if (_current_state.contains(typeid(T)))
 			{
-				std::cerr << "Attempt to initialize state " << typeid(T).name() << " more than once.\n";
-				std::abort();
+				RUNTIME_ERROR(std::format("Attempt to initialize a state of type {} twice.", types::typedesc<T>.name()));
 			}
 
 			auto &state = _current_state[typeid(T)];
@@ -97,5 +95,3 @@ namespace dib::ecs
 		return ((state.current<decltype(States)>() == States) && ...);
 	}
 }
-
-#endif

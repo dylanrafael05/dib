@@ -1,23 +1,28 @@
-#ifndef __SPARSE_LIST_H
-#define __SPARSE_LIST_H
+#pragma once 
 
-#include <vector>
 #include <utility>
-#include <stdexcept>
-#include "dib/optional.h"
 
+#include "dib/option.h"
+#include "dib/preprocess.h"
+#include "dib/vector.h"
+
+/// This file defines the idea of a 'sparse list', which is analogous to a vector
+/// whose elements can either be present or absent. It is stored in memory as a
+/// vector of option to element type, alongside a vector of 'free' spaces.
 namespace dib::structures
 {
-	template<class T, class Allocator> 
+	template<class T> 
 	class SparseList;
 
 	template<class T>
 	class SparseListIterator
 	{
-		template<class, class>
+		template<class>
 		friend class SparseList;
 
-		using _val = std::conditional_t<std::is_const_v<T>, const dib::Optional<std::remove_const_t<T>>, dib::Optional<T>>;
+		using _val = std::conditional_t<std::is_const_v<T>, 
+			const dib::option::Option<std::remove_const_t<T>>, 
+			dib::option::Option<T>>;
 
 		_val *_ptr;
 		_val *_str;
@@ -40,11 +45,11 @@ namespace dib::structures
 		}
 
 	public:
-		T &operator*() { return **_ptr; }
-		std::add_const_t<T> &operator*() const { return **_ptr; }
+		T &operator*() { return _ptr->unwrap(); }
+		std::add_const_t<T> &operator*() const { return _ptr->unwrap(); }
 
-		T *operator->() { return &**_ptr; }
-		std::add_const_t<T> *operator->() const { return &**_ptr; }
+		T *operator->() { return &operator*(); }
+		std::add_const_t<T> *operator->() const { return &operator*(); }
 
 		SparseListIterator &operator++() { increment(); return *this; }
 		SparseListIterator &operator--() { decrement(); return *this; }
@@ -60,14 +65,11 @@ namespace dib::structures
 		size_t index() const { return _ptr - _str; }
 	};
 
-	template<class T, class Allocator = std::allocator<T>>
+	template<class T>
 	class SparseList
 	{
-		using ValAllocator = std::allocator_traits<Allocator>::template rebind_alloc<dib::Optional<T>>;
-		using SizeAllocator = std::allocator_traits<Allocator>::template rebind_alloc<size_t>;
-
-		std::vector<dib::Optional<T>, ValAllocator> storage;
-		std::vector<size_t, SizeAllocator> free_indices;
+		Vector<dib::option::Option<T>> storage;
+		Vector<size_t> free_indices;
 
 		size_t allocate()
 		{
@@ -84,8 +86,8 @@ namespace dib::structures
 		}
 
 	public:
-		SparseList(const Allocator &alloc = {})
-			: storage(alloc), free_indices(alloc)
+		SparseList()
+			: storage(), free_indices()
 		{}
 
 		using value_type = T;
@@ -96,49 +98,42 @@ namespace dib::structures
 
 		// RAW GETTERS //
 		
-		/// <summary>
 		/// Get the raw storage associated with the provided index,
 		/// which can either hold a value or be freed (a.k.a. having no value).
-		/// </summary>
-		dib::Optional<T&> get(size_t index)
+		dib::option::Option<T&> get(size_t index)
 		{
 			if (!storage[index]) return {};
 			return { storage[index] };
 		}
 
-		/// <summary>
 		/// Get the raw storage associated with the provided index,
 		/// which can either hold a value or be freed (a.k.a. having no value).
-		/// </summary>
-		dib::Optional<const T&> get(size_t index) const
+		dib::option::Option<const T&> get(size_t index) const
 		{
 			if (!storage[index]) return {};
 			return { storage[index] };
 		}
 
-		/// <summary>
-		/// Get the value at the provided index. Throws std::bad_optional_access 
-		/// if the index is freed.
-		/// </summary>
+		/// Get the value at the provided index. Throws if the index is freed.
 		T &at(size_t index)
 		{
-			return *storage[index];
+			return storage[index].unwrap();
 		}
 
-		/// <summary>
-		/// Get the value at the provided index. Throws std::bad_optional_access 
-		/// if the index is freed.
-		/// </summary>
+		/// Get the value at the provided index. Throws if the index is freed.
 		const T &at(size_t index) const
 		{
-			return *storage[index];
+			return storage[index].unwrap();
 		}
 
+		/// Check if the provided index currently has a value.
 		bool has_value(size_t index) const
 		{
 			return storage[index];
 		}
 
+		/// Insert the provided value into this list, returning the position at which
+		/// the element was inserted.
 		size_t insert(const T &value)
 		{
 			auto slot = allocate();
@@ -148,6 +143,8 @@ namespace dib::structures
 			return slot;
 		}
 
+		/// Insert the provided value into this list, returning the position at which
+		/// the element was inserted.
 		size_t insert(T &&value)
 		{
 			auto slot = allocate();
@@ -157,22 +154,26 @@ namespace dib::structures
 			return slot;
 		}
 
+		/// Insert a new value into this list via construction, returning the position at which
+		/// the element was inserted.
 		template<class... Args>
 		size_t emplace(Args &&...args)
 		{
 			auto slot = allocate();
 
-			storage[slot] = { std::forward<Args>(args)... };
+			storage[slot] = { FORWARD(args)... };
 
 			return slot;
 		}
 
+		/// Relinquish the value at the provided index.
 		void free(size_t index)
 		{
 			storage[index] = {};
 			free_indices.push_back(index);
 		}
 
+		/// Relinquish all values which match the provided predicate.
 		template<class L>
 		size_t free_if(L &&lambd)
 		{
@@ -201,20 +202,9 @@ namespace dib::structures
 			return size() == 0;
 		}
 
-		/// <summary>
 		/// The amount of elements this container can store
 		/// without needing to update its internal sizes.
-		/// </summary>
 		size_t capacity() const
-		{
-			return storage.size();
-		}
-
-		/// <summary>
-		/// The amount of elements this container can store
-		/// without needing to reallocate its internal containers.
-		/// </summary>
-		size_t full_capacity() const
 		{
 			return storage.capacity();
 		}
@@ -231,9 +221,7 @@ namespace dib::structures
 		SparseListIterator<T> iterator_from_index(size_t index) { return { storage.data() + index, storage.data(), storage.data() + storage.size()}; }
 		SparseListIterator<const T> iterator_from_index(size_t index) const { return { storage.data() + index, storage.data(), storage.data() + storage.size() }; }
 
-		dib::Optional<T> *data() { return storage.data(); }
-		const dib::Optional<T> *data() const { return storage.data(); }
+		dib::option::Option<T> *data() { return storage.data(); }
+		const dib::option::Option<T> *data() const { return storage.data(); }
 	};
 }
-
-#endif

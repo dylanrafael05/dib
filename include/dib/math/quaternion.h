@@ -1,9 +1,8 @@
-#ifndef __DIBMATH_QUATERNION_H
-#define __DIBMATH_QUATERNION_H
+#pragma once
 
-#include "vec.h"
 #include <stddef.h>
 
+#include "dib/math/vec.h"
 #include "dib/types.h"
 
 namespace dib::math
@@ -81,5 +80,3 @@ namespace std
     template<> struct tuple_size<dib::math::quaternion> {constexpr static size_t value = 4;};
     template<size_t I> struct tuple_element<I, dib::math::quaternion> {using type = float;};
 }
-
-#endif

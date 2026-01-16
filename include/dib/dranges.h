@@ -1,31 +1,58 @@
-#ifndef __DIB_DRANGES_H
-#define __DIB_DRANGES_H
+#pragma once
 
-#include <vector>
 #include <concepts>
-#include <unordered_map>
-#include <list>
-#include <ranges>
 #include <utility>
 #include <functional>
-#include "dib/optional.h"
+#include <ranges>
+
+#include "dib/option.h"
 
 namespace dib::dranges
 {
+    /// A helper type which can be assigned to anything and does
+    /// nothing.
+    struct Absorber
+    {
+        template<class T>
+        Absorber &operator=(T &&) {return *this;}
+    };
+
+    /// A forward iterator which counts how many times it has been incremented,
+    /// and which returns an absorber
+    struct CountingIterator
+    {
+        size_t count;
+
+        CountingIterator &operator++()
+        {
+            count++;
+            return *this;
+        }
+
+        CountingIterator operator++(int)
+        {
+            auto copy = *this;
+            count++;
+            return copy;
+        }
+
+        Absorber operator*() const {return {};}
+    };
+
 	namespace detail
 	{
-		template<class T> struct __optional_helper : std::false_type {};
-		template<class T> struct __optional_helper<dib::Optional<T>> : std::true_type { using type = T; };
+		template<class T> struct OptionalHelperType : std::false_type {};
+		template<class T> struct OptionalHelperType<dib::option::Option<T>> : std::true_type { using type = T; };
 
-		template<class T> concept is_optional = __optional_helper<T>::value;
-		template<class T> using optional_unwrap_t = __optional_helper<T>::type;
+		template<class T> concept IsOptional = OptionalHelperType<T>::value;
+		template<class T> using UnwrapOptional = OptionalHelperType<T>::type;
 
 		template<class T>
 		class LambdaWrapper
 		{
 		public:
 			constexpr LambdaWrapper()
-				: value(dib::none)
+				: value(dib::option::none)
 			{}
 
 			constexpr LambdaWrapper(const T &value) requires std::is_copy_constructible_v<T>
@@ -33,7 +60,7 @@ namespace dib::dranges
 			{}
 
 			constexpr LambdaWrapper(T &&value) requires std::is_move_constructible_v<T>
-				: value(std::move(value))
+				: value(MOVE(value))
 			{}
 
 			constexpr LambdaWrapper(const LambdaWrapper &) = default;
@@ -44,21 +71,21 @@ namespace dib::dranges
 				// TODO: is this possible in any other way? //
 				// Currently, this nukes constexpr support, but is also //
 				// necessary to maintain forward iterator support. //
-				value.~Optional();
-				new (&value) dib::Optional<T>(other.value);
+				value.~Option();
+				new (&value) dib::option::Option<T>(other.value);
 
 				return *this;
 			}
 
 			constexpr LambdaWrapper &operator=(LambdaWrapper &&other) requires std::is_move_constructible_v<T>
 			{
-				value.~Optional();
-				new (&value) dib::Optional<T>(std::move(other.value));
+				value.~Option();
+				new (&value) dib::option::Option<T>(MOVE(other.value));
 
 				return *this;
 			}
 
-			dib::Optional<T> value;
+			dib::option::Option<T> value;
 		};
 
 		template<class T> struct ReferenceWrapHelper
@@ -82,17 +109,17 @@ namespace dib::dranges
 			using type = T *;
 
 			static T *wrap(T &&val) { return &val; }
-			static T &&unwrap(T *val) { return std::move(*val); }
+			static T &&unwrap(T *val) { return MOVE(*val); }
 		};
 
 		struct GenerateEndSentinel {};
 
 		template<std::invocable Generator>
-			requires is_optional<std::invoke_result_t<Generator>>
+			requires IsOptional<std::invoke_result_t<Generator>>
 		class InputGenerateIterator
 		{
 			using result_t = std::invoke_result_t<Generator>;
-			using value_t = optional_unwrap_t<result_t>;
+			using value_t = UnwrapOptional<result_t>;
 
 			constexpr static bool is_reference = std::is_reference_v<value_t>;
 			using arg_t = std::conditional_t<is_reference,
@@ -115,8 +142,8 @@ namespace dib::dranges
 			using difference_type = std::ptrdiff_t;
 			using iterator_category = std::input_iterator_tag;
 
-			constexpr decltype(auto) operator*() const { return *_val; }
-			constexpr decltype(auto) operator->() const { return _val.operator->(); }
+			constexpr decltype(auto) operator*() const { return _val.unwrap(); }
+			constexpr decltype(auto) operator->() const { return &_val.unwrap(); }
 
 			constexpr InputGenerateIterator &operator++()
 			{
@@ -133,11 +160,11 @@ namespace dib::dranges
 		};
 
 		template<std::invocable Generator>
-			requires is_optional<std::invoke_result_t<Generator>>
+			requires IsOptional<std::invoke_result_t<Generator>>
 		class ForwardGenerateIterator
 		{
 			using result_t = std::invoke_result_t<Generator>;
-			using value_t = optional_unwrap_t<result_t>;
+			using value_t = UnwrapOptional<result_t>;
 
 			constexpr static bool is_reference = std::is_reference_v<value_t>;
 			using arg_t = std::conditional_t<is_reference,
@@ -158,15 +185,15 @@ namespace dib::dranges
 			{}
 
 			constexpr ForwardGenerateIterator(const Generator &g)
-				: _gen(g), _val(std::invoke(*_gen.value))
+				: _gen(g), _val(std::invoke(_gen.value.unwrap()))
 			{}
 
 			using value_type = std::remove_reference_t<value_t>;
 			using difference_type = std::ptrdiff_t;
 			using iterator_category = std::forward_iterator_tag;
 
-			constexpr decltype(auto) operator*() const { return *_val; }
-			constexpr decltype(auto) operator->() const { return _val.operator->(); }
+			constexpr decltype(auto) operator*() const { return _val.unwrap(); }
+			constexpr decltype(auto) operator->() const { return &_val.unwrap(); }
 
 			constexpr ForwardGenerateIterator &operator++()
 			{
@@ -189,7 +216,7 @@ namespace dib::dranges
 		};
 
 		template<std::invocable Generator, bool Input>
-			requires is_optional<std::invoke_result_t<Generator>>
+			requires IsOptional<std::invoke_result_t<Generator>>
 		class GenerateOptionalRange
 		{
 			Generator _gen;
@@ -201,7 +228,7 @@ namespace dib::dranges
 
 		public:
 			constexpr explicit GenerateOptionalRange(Generator &&g)
-				: _gen(std::move(g))
+				: _gen(MOVE(g))
 			{}
 
 			constexpr iter begin()
@@ -216,10 +243,10 @@ namespace dib::dranges
 		};
 
 		template<std::invocable Generator, bool Input>
-			requires is_optional<std::invoke_result_t<Generator>>
+			requires IsOptional<std::invoke_result_t<Generator>>
 		class GenerateOptionalRangeWithStart
 		{
-			using val_t = optional_unwrap_t<std::invoke_result_t<Generator>>;
+			using val_t = UnwrapOptional<std::invoke_result_t<Generator>>;
 			using wrapper = ReferenceWrapHelper<val_t>;
 			using wrap_t = wrapper::type;
 
@@ -234,13 +261,13 @@ namespace dib::dranges
 		public:
 			template<class Start>
 			constexpr explicit GenerateOptionalRangeWithStart(Start &&val, Generator &&g)
-				: _gen(std::move(g)), _val(wrapper::wrap(std::forward<Start>(val)))
+				: _gen(MOVE(g)), _val(wrapper::wrap(std::forward<Start>(val)))
 			{}
 
 			constexpr iter begin()
 			{
-				if constexpr (Input) return { wrapper::unwrap(std::move(_val)), &_gen };
-				else return { wrapper::unwrap(std::move(_val)), _gen };
+				if constexpr (Input) return { wrapper::unwrap(MOVE(_val)), &_gen };
+				else return { wrapper::unwrap(MOVE(_val)), _gen };
 			}
 
 			constexpr GenerateEndSentinel end()
@@ -249,28 +276,28 @@ namespace dib::dranges
 			}
 		};
 
-		static_assert(std::ranges::forward_range<GenerateOptionalRange<dib::Optional<int>(*)(), false>>,
+		static_assert(std::ranges::forward_range<GenerateOptionalRange<dib::option::Option<int>(*)(), false>>,
 			"Generated ranges should satisfy forward_range");
 
-		static_assert(std::ranges::forward_range<GenerateOptionalRange<dib::Optional<int &>(*)(), false>>,
+		static_assert(std::ranges::forward_range<GenerateOptionalRange<dib::option::Option<int &>(*)(), false>>,
 			"Generated ranges should satisfy forward_range");
 
-		static_assert(std::ranges::forward_range<GenerateOptionalRangeWithStart<dib::Optional<int>(*)(), false>>,
+		static_assert(std::ranges::forward_range<GenerateOptionalRangeWithStart<dib::option::Option<int>(*)(), false>>,
 			"Generated ranges should satisfy forward_range");
 
-		static_assert(std::ranges::forward_range<GenerateOptionalRangeWithStart<dib::Optional<int &>(*)(), false>>,
+		static_assert(std::ranges::forward_range<GenerateOptionalRangeWithStart<dib::option::Option<int &>(*)(), false>>,
 			"Generated ranges should satisfy forward_range");
 
-		static_assert(std::ranges::input_range<GenerateOptionalRange<dib::Optional<int>(*)(), true>>,
+		static_assert(std::ranges::input_range<GenerateOptionalRange<dib::option::Option<int>(*)(), true>>,
 			"Generated ranges should satisfy input_range");
 
-		static_assert(std::ranges::input_range<GenerateOptionalRange<dib::Optional<int &>(*)(), true>>,
+		static_assert(std::ranges::input_range<GenerateOptionalRange<dib::option::Option<int &>(*)(), true>>,
 			"Generated ranges should satisfy input_range");
 
-		static_assert(std::ranges::input_range<GenerateOptionalRangeWithStart<dib::Optional<int>(*)(), true>>,
+		static_assert(std::ranges::input_range<GenerateOptionalRangeWithStart<dib::option::Option<int>(*)(), true>>,
 			"Generated ranges should satisfy input_range");
 
-		static_assert(std::ranges::input_range<GenerateOptionalRangeWithStart<dib::Optional<int &>(*)(), true>>,
+		static_assert(std::ranges::input_range<GenerateOptionalRangeWithStart<dib::option::Option<int &>(*)(), true>>,
 			"Generated ranges should satisfy input_range");
 	}
 
@@ -281,10 +308,10 @@ namespace dib::dranges
 	/// std::input_range, and cannot be iterated over multiple times.
 	/// </summary>
 	template<std::invocable Generator>
-	requires detail::is_optional<std::invoke_result_t<Generator>>
+	requires detail::IsOptional<std::invoke_result_t<Generator>>
 	constexpr auto generate(Generator &&g)
 	{
-		return detail::GenerateOptionalRange<Generator, true>{ std::move(g) };
+		return detail::GenerateOptionalRange<Generator, true>{ MOVE(g) };
 	}
 
 	/// <summary>
@@ -294,11 +321,11 @@ namespace dib::dranges
 	/// std::input_range, and cannot be iterated over multiple times.
 	/// </summary>
 	template<std::invocable Generator, class Start>
-	requires detail::is_optional<std::invoke_result_t<Generator>>
-		&& std::convertible_to<Start, detail::optional_unwrap_t<std::invoke_result_t<Generator>>>
+	requires detail::IsOptional<std::invoke_result_t<Generator>>
+		&& std::convertible_to<Start, detail::UnwrapOptional<std::invoke_result_t<Generator>>>
 	constexpr auto generate(Start &&start, Generator &&g)
 	{
-		return detail::GenerateOptionalRangeWithStart<Generator, true>{ std::forward<Start>(start), std::move(g) };
+		return detail::GenerateOptionalRangeWithStart<Generator, true>{ std::forward<Start>(start), MOVE(g) };
 	}
 
 	/// <summary>
@@ -309,10 +336,10 @@ namespace dib::dranges
 	/// any set of inputs as well as being copy-constructible.
 	/// </summary>
 	template<std::invocable Generator>
-	requires detail::is_optional<std::invoke_result_t<Generator>>
+	requires detail::IsOptional<std::invoke_result_t<Generator>>
 	constexpr auto generate_multi(Generator &&g)
 	{
-		return detail::GenerateOptionalRange<Generator, false>{ std::move(g) };
+		return detail::GenerateOptionalRange<Generator, false>{ MOVE(g) };
 	}
 
 	/// <summary>
@@ -323,11 +350,11 @@ namespace dib::dranges
 	/// any set of inputs as well as being copy-constructible.
 	/// </summary>
 	template<std::invocable Generator, class Start>
-	requires detail::is_optional<std::invoke_result_t<Generator>>
-		&& std::convertible_to<Start, detail::optional_unwrap_t<std::invoke_result_t<Generator>>>
+	requires detail::IsOptional<std::invoke_result_t<Generator>>
+		&& std::convertible_to<Start, detail::UnwrapOptional<std::invoke_result_t<Generator>>>
 	constexpr auto generate_multi(Start &&start, Generator &&g)
 	{
-		return detail::GenerateOptionalRangeWithStart<Generator, false>{ std::forward<Start>(start), std::move(g) };
+		return detail::GenerateOptionalRangeWithStart<Generator, false>{ std::forward<Start>(start), MOVE(g) };
 	}
 
 	namespace detail
@@ -355,7 +382,7 @@ namespace dib::dranges
 
 			for (auto it = range.begin(); it != range.end(); it++)
 			{
-				out.push_back(ranges::iter_move(it));
+				out.push_back(std::ranges::iter_move(it));
 			}
 
 			return out;
@@ -406,7 +433,7 @@ namespace dib::dranges
 		template<std::ranges::range Rng>
 		auto operator|(Rng &&range, EnumerateFn)
 		{
-			return range | std::views::transform([i = (size_t)0](auto &&value) mutable
+			return range | std::ranges::views::transform([i = (size_t)0](auto &&value) mutable
 			{
 				if constexpr (std::ranges::borrowed_range<Rng>)
 				{
@@ -431,15 +458,13 @@ namespace dib::dranges
 			std::remove_reference_t<E> _end;
 
 		public:
-			Range(B &&begin, E &&end) : _begin(DIB_FWD(begin)), _end(DIB_FWD(end))
+			Range(B &&begin, E &&end) : _begin(FORWARD(begin)), _end(FORWARD(end))
 			{}
 
 			auto begin() const { return _begin; }
 			auto end() const { return _end; }
 		};
 
-		return Range(DIB_FWD(begin), DIB_FWD(end));
+		return Range(FORWARD(begin), FORWARD(end));
 	}
 }
-
-#endif

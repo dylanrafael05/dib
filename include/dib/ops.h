@@ -1,51 +1,62 @@
-#ifndef __DIB_OPS_H
-#define __DIB_OPS_H
+#pragma once
 
 #include "dib/lambda.h"
 
+/// This namespace contains helpers which invoke each of the builtin
+/// operators on their provided arguments.
 namespace dib::ops
 {
-#define op2(name, op) \
-		constexpr auto name = DIB_LMB_2(_1 op _2); \
-		using name##_t = decltype(name)
+#define op1(name, tname, op) \
+		constexpr auto name = DIB_LMB_NC_1((), op); \
+		using tname = decltype(name)
+#define op2(name, tname, op) \
+		constexpr auto name = DIB_LMB_NC_2((), _1 op _2); \
+		using tname = decltype(name)
 
-	op2(less, <);
-	op2(less_equal, <=);
+	op2(less, Less, <);
+	op2(less_equal, LessEqual, <=);
 
-	op2(great, >);
-	op2(great_equal, >=);
+	op2(greater, Greater, >);
+	op2(greater_equal, GreaterEqual, >=);
 
-	op2(equal, ==);
-	op2(not_equal, !=);
+	op2(equal, Equal, ==);
+	op2(not_equal, NotEqual, !=);
 
-	op2(compare, <=>);
+	op2(compare, Compare, <=>);
 
-	op2(plus, +);
-	op2(minus, -);
-	op2(multiply, *);
-	op2(divide, /);
-	op2(modulo, %);
+	op2(plus, Plus, +);
+	op2(minus, Minus, -);
+	op2(multiply, Multiply, *);
+	op2(divide, Divide, /);
+	op2(modulo, Modulo, %);
 
-	op2(assign, =);
-	op2(plus_assign, +=);
-	op2(minus_assign, -=);
-	op2(multiply_assign, *=);
-	op2(divide_assign, /=);
-	op2(modulo_assign, %=);
+	op2(assign, Assign, =);
+	op2(plus_assign, PlusAssign, +=);
+	op2(minus_assign, MinusAssign, -=);
+	op2(multiply_assign, MultiplyAssign, *=);
+	op2(divide_assign, DivideAssign, /=);
+	op2(modulo_assign, ModuloAssign, %=);
 
-	op2(bool_and, &);
-	op2(bool_or, |);
-	op2(bool_xor, ^);
-	op2(left_shift, <<);
-	op2(right_shift, >>);
+	op2(bool_and, BoolAnd, &);
+	op2(bool_or, BoolOr, |);
+	op2(bool_xor, BoolXor, ^);
+	op2(left_shift, LeftShift, <<);
+	op2(right_shift, RightShift, >>);
 
-	op2(and_assign, &=);
-	op2(or_assign, |=);
-	op2(xor_assign, ^=);
-	op2(left_shift_assign, <<=);
-	op2(right_shift_assign, >>=);
+	op2(and_assign, AndAssign, &=);
+	op2(or_assign, OrAssign, |=);
+	op2(xor_assign, XorAssign, ^=);
+	op2(left_shift_assign, LeftShiftAssign, <<=);
+	op2(right_shift_assign, RightShiftAssign, >>=);
 
+	op1(identity, Identity, _1);
+
+	op1(posit, Posit, +_1);
+	op1(negate, Negate, -_1);
+
+	op1(deref, Deref, *_1);
+	op1(addrof, AddrOf, &_1);
+
+#undef op1
 #undef op2
 }
-
-#endif

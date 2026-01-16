@@ -1,18 +1,21 @@
+#include "dib/app.h"
 #include "dib/ecs/world.h"
 #include "dib/ecs/systems.h"
 #include "raylib.h"
 
 using namespace dib;
 using namespace dib::ecs;
+using namespace dib::app;
 
-void flush_commands(Commands &commands)
+void flush_commands()
 {
-    commands.flush();
+    this_app().commands().flush();
 }
 
-void run_state_transitions(const Systems &scheduler, StateMachine &states)
+void run_state_transitions()
 {
-    states.update(scheduler);
+    this_app().state_machine().update(
+        this_app().systems());
 }
 
 void ecs::detail::initialize_main(Systems &scheduler)

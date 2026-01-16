@@ -3,8 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <ranges>
-#include <bit>
+#include <algorithm>
 
 namespace dib::bits
 {

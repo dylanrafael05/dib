@@ -37,7 +37,7 @@ namespace dib::plugins
         inline ecs::decl::SystemGroup RenderUI;
     }
 
-    void clear_background(ecs::Singletons &);
+    void clear_background();
 }
 
 #endif

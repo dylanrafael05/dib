@@ -1,11 +1,11 @@
-#ifndef __DIB_PAGINATION_H
-#define __DIB_PAGINATION_H
+#pragma once
 
-#include "vectors.h"
-#include "ops.h"
 #include <stdint.h>
 #include <numeric>
 #include <ranges>
+
+#include "dib/vector.h"
+#include "dib/ops.h"
 
 namespace dib::pagination
 {
@@ -102,7 +102,7 @@ namespace dib::pagination
 			{}
 
 		public:
-			iterator_base(iterator_base<const Tc> &other) requires !std::is_const_v<Tc>
+			iterator_base(iterator_base<const Tc> &other) requires (!std::is_const_v<Tc>)
 				: _out_it(other._out_it)
 				, _out_vec(other._out_vec)
 				, _in_it(other._in_it)
@@ -189,7 +189,14 @@ namespace dib::pagination
 			return (size_t)((value - min_value()) / _page_size);
 		}
 
-		auto begin() { return iterator(_pages.begin(), &_pages, empty() ? {} : _pages.front().begin(), empty() ? nullptr : &_pages.front()); }
+		auto begin() 
+		{ 
+			return iterator(
+				_pages.begin(), 
+				&_pages, 
+				empty() ? decltype(_pages.front().begin()){} : _pages.front().begin(), 
+				empty() ? nullptr : &_pages.front()); 
+		}
 		auto begin() const { return const_cast<PageVector *>(this)->begin(); }
 		auto cbegin() const { return begin(); }
 
@@ -220,19 +227,19 @@ namespace dib::pagination
 		}
 
 		iterator insert(const T &value) { return emplace(value); }
-		iterator insert(T &&value) { return emplace(DIB_MOV(value)); }
+		iterator insert(T &&value) { return emplace(MOVE(value)); }
 
 		iterator emplace(auto &&...args)
 		{
 			// TODO: handle adding pages for values outside of current range //
 
-			auto item = T(DIB_FWD(args)...);
+			auto item = T(FORWARD(args)...);
 			auto value = Evaluator::evaluate(item);
 
 			auto it = find(value);
 			auto iidx = it._in_it - it._out_it->begin();
 
-			it._out_it->insert(DIB_MOV(item), it._in_it);
+			it._out_it->insert(MOVE(item), it._in_it);
 			_count++;
 
 			return it._out_it->begin() + iidx;
@@ -247,5 +254,3 @@ namespace dib::pagination
 		}
 	};
 }
-
-#endif

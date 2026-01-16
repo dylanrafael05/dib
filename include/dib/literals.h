@@ -1,9 +1,8 @@
-#ifndef __LITERALS_H
-#define __LITERALS_H
+#pragma once
 
 #include <stdint.h>
 #include <stddef.h>
-#include <exception>
+
 #include "raylib.h"
 
 namespace dib::literals
@@ -42,5 +41,3 @@ namespace dib::literals
         }
     }
 }
-
-#endif

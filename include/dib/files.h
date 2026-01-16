@@ -1,5 +1,4 @@
-#ifndef __DIB_FILES_H
-#define __DIB_FILES_H
+#pragma once
 
 #include <filesystem>
 #include <string>
@@ -8,7 +7,6 @@ namespace dib::files
 {
 	using namespace std::filesystem;
 
+	/// Read all text from the provided file
 	std::string read_all_text(const path &file);
 }
-
-#endif

@@ -1,8 +1,8 @@
 #include "dib/sparse_bitset.h"
-#include "dib/function_util.h"
+#include "dib/functional.h"
+#include "dib/dranges.h"
 
 #include <algorithm>
-#include <iostream>
 #include <assert.h>
 
 using namespace dib::structures;
@@ -318,7 +318,7 @@ det::SparseBitset_Impl det::SparseBitset_Impl::or_with(const SparseBitset_Impl &
 {
     auto union_counter = std::set_union(
         begin_entries(), end_entries(), other.begin_entries(), other.end_entries(), 
-        dib::functional::CountingIterator{},
+        dib::dranges::CountingIterator{},
         [](const Entry &a, const Entry &b) {return a.index < b.index;});
     
     auto union_count = union_counter.count;
@@ -373,7 +373,7 @@ det::SparseBitset_Impl det::SparseBitset_Impl::and_with(const SparseBitset_Impl 
 {
     auto union_counter = std::set_intersection(
         begin_entries(), end_entries(), other.begin_entries(), other.end_entries(), 
-        dib::functional::CountingIterator{},
+        dib::dranges::CountingIterator{},
         [](const Entry &a, const Entry &b) {return a.index < b.index;});
     
     auto union_count = union_counter.count;
@@ -439,7 +439,7 @@ SparseBitsetIterator det::SparseBitset_Impl::end() const
     return {end_entries(), end_entries(), 0};
 }
 
-size_t det::SparseBitset_Impl::hash() const
+size_t det::SparseBitset_Impl::get_hash() const
 {
     std::hash<size_t> hasher;
     size_t result = 0;

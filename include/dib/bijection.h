@@ -1,11 +1,11 @@
-#ifndef __DIB_BIJECTION_H
-#define __DIB_BIJECTION_H
+#pragma once
 
 #include <unordered_set>
-#include "optional.h"
-#include "sparse_list.h"
-#include "types.h"
-#include "raw_memory_utils.h"
+
+#include "dib/option.h"
+#include "dib/sparse_list.h"
+#include "dib/types.h"
+#include "dib/raw_memory_utils.h"
 
 namespace dib::structures
 {
@@ -16,7 +16,7 @@ namespace dib::structures
 		using Base::Base;
 
 		HashThroughPointer(const Base &base) : Base(base) {}
-		HashThroughPointer(Base &&base) : Base(std::move(base)) {}
+		HashThroughPointer(Base &&base) : Base(MOVE(base)) {}
 
 		decltype(auto) operator()(auto &&value) const
 		{
@@ -31,7 +31,7 @@ namespace dib::structures
 		using Base::Base;
 
 		EqualsThroughPointer(const Base &base) : Base(base) {}
-		EqualsThroughPointer(Base &&base) : Base(std::move(base)) {}
+		EqualsThroughPointer(Base &&base) : Base(MOVE(base)) {}
 
 		decltype(auto) operator()(auto &&left, auto &&right) const
 		{
@@ -45,22 +45,18 @@ namespace dib::structures
 		class HashLeft = std::hash<Left>,
 		class HashRight = std::hash<Right>,
 		class EqualLeft = std::equal_to<>,
-		class EqualRight = std::equal_to<>,
-		class Allocator = std::allocator<int>
+		class EqualRight = std::equal_to<>
 	>
 	class Bijection
 	{
-		constexpr static bool LRDiffer = types::not_cvref_eq<Left, Right>;
-
-		template<class T>
-		using AllocR = std::allocator_traits<Allocator>::template rebind_alloc<T>;
+		constexpr static bool LRDiffer = types::NotCVRefEq<Left, Right>;
 
 		using Pair = std::pair<Left, Right>;
-		using PairOpt = dib::Optional<Pair>;
+		using PairOpt = dib::option::Option<Pair>;
 		using PairPtr = PairOpt *;
-		using PairList = SparseList<Pair, AllocR<Pair>>;
-		using LeftMap = std::unordered_set<Left *, HashThroughPointer<HashLeft>, EqualsThroughPointer<EqualLeft>, AllocR<Left *>>;
-		using RightMap = std::unordered_set<Right *, HashThroughPointer<HashRight>, EqualsThroughPointer<EqualRight>, AllocR<Right *>>;
+		using PairList = SparseList<Pair>;
+		using LeftMap = std::unordered_set<Left *, HashThroughPointer<HashLeft>, EqualsThroughPointer<EqualLeft>>;
+		using RightMap = std::unordered_set<Right *, HashThroughPointer<HashRight>, EqualsThroughPointer<EqualRight>>;
 
 		PairList _pairs;
 		LeftMap _left;
@@ -91,12 +87,11 @@ namespace dib::structures
 			const HashLeft &hashleft = HashLeft(),
 			const HashRight &hashright = HashRight(),
 			const EqualLeft &equalsleft = EqualLeft(),
-			const EqualRight &equalsright = EqualRight(),
-			const Allocator &alloc = Allocator()
+			const EqualRight &equalsright = EqualRight()
 		)
-			: _pairs(alloc), 
-			  _left(4, HashThroughPointer<HashLeft>(hashleft), EqualsThroughPointer<EqualLeft>(equalsleft), alloc), 
-			  _right(4, HashThroughPointer<HashRight>(hashright), EqualsThroughPointer<EqualRight>(equalsright), alloc)
+			: _pairs(), 
+			  _left(4, HashThroughPointer<HashLeft>(hashleft), EqualsThroughPointer<EqualLeft>(equalsleft)), 
+			  _right(4, HashThroughPointer<HashRight>(hashright), EqualsThroughPointer<EqualRight>(equalsright))
 		{}
 
 		using value_type = Pair;
@@ -112,11 +107,11 @@ namespace dib::structures
 				return false;
 
 			auto old_pairs_start = _pairs.data();
-			auto old_pairs_cap = _pairs.full_capacity();
+			auto old_pairs_cap = _pairs.capacity();
 
-			auto idx = _pairs.emplace(std::move(l), std::move(r));
+			auto idx = _pairs.emplace(MOVE(l), MOVE(r));
 
-			if (old_pairs_cap != _pairs.full_capacity())
+			if (old_pairs_cap != _pairs.capacity())
 				replace_pointers(old_pairs_start);
 
 			_left.insert(&_pairs.at(idx).first);
@@ -130,7 +125,7 @@ namespace dib::structures
 			Left lcopy = l;
 			Right rcopy = r;
 
-			return insert(std::move(lcopy), std::move(rcopy));
+			return insert(MOVE(lcopy), MOVE(rcopy));
 		}
 
 		// Iteration and collection accessors //
@@ -194,5 +189,3 @@ namespace dib::structures
 		}
 	};
 }
-
-#endif

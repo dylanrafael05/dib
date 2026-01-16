@@ -1,8 +1,8 @@
-#ifndef __MEMORY_ECS_H
-#define __MEMORY_ECS_H
+#pragma once
 
-// TODO: make a mem folder and split this file up.
+// TODO: split into mem_utils.h, erased.h, and temp_alloc.h
 
+#include <concepts>
 #include <stddef.h>
 #include <memory>
 #include <mutex>
@@ -14,6 +14,7 @@
 
 #include "dib/types.h"
 #include "dib/raw_memory_utils.h"
+#include "dib/vector.h"
 
 namespace dib::mem
 {
@@ -213,14 +214,14 @@ namespace dib::mem
     public:
         template<class... Args>
         constexpr Forgotten(Args &&...args)
-            : val(std::forward<Args>(args)...)
+            : val(FORWARD(args)...)
         {}
 
         constexpr Forgotten(const Forgotten &other)
             : val(other.val)
         {}
         constexpr Forgotten(Forgotten &&other)
-            : val(std::move(other.val))
+            : val(MOVE(other.val))
         {}
 
         constexpr ~Forgotten() {}
@@ -239,15 +240,27 @@ namespace dib::mem
         }
     };
 
-    /// @brief "Prevent" the destructor of the provided value from being run. The destructor is still called, but on a default-constructed
-    /// object, and thus should not destruct the actual values held by the original object. If your type is not cheap to default-construct,
-    /// consider storing it as a Forgotten<T>, which does not incur overhead by explicitly avoiding the destructor call within its definition.
+    /// @brief "Prevent" the destructor of the provided value from being run. The destructor is still called, but on a moved-from
+    /// object, and thus should not destruct the actual values held by the original object.
     /// @param value The value to forget.
-    template<std::constructible_from T>
+    template<std::move_constructible T>
     void forget(T &&value)
     {
         using T_ = std::remove_cvref_t<T>;
-        new(&value) T_();
+        Forgotten<T_> _(MOVE(value));
+    }
+    
+    namespace detail
+    {
+        static inline char zst_storage = 0;
+    }
+
+    /// Create a pointer to a valid, dereferenceable memory address
+    /// for a zero-sized-type (which in C++ is one byte large).
+    template<types::IsZST T>
+    T *pointer_to_zst()
+    {
+        return (T*) &detail::zst_storage;
     }
 }
 
@@ -255,22 +268,6 @@ namespace dib::structures
 {
     // Manual destruction //
     using ErasedPtr = void *;
-    
-    namespace detail
-    {
-        template<class>
-        struct FnPtrHelper
-        {};
-
-        template<class R, class... A>
-        struct FnPtrHelper<R(A...)>
-        {
-            using type = R(*)(A...);
-        };
-    }
-    
-    template<class T>
-    using Fn = typename detail::FnPtrHelper<T>::type;
 
     class ErasedVec
     {
@@ -355,120 +352,57 @@ namespace dib::structures
         }
     };
 
-    class InhomogeneousStack
-    {
-        std::vector<uint8_t> buffer;
-        size_t count = 0;
-
-    public:
-        InhomogeneousStack() = default;
-        InhomogeneousStack(const InhomogeneousStack &) = delete;
-        InhomogeneousStack(InhomogeneousStack &&) = delete;
-
-        void push(types::TypeDescriptor desc, void *value);
-        size_t size() const { return count; }
-
-        void *top();
-        const void *top() const;
-        types::TypeDescriptor top_type() const;
-
-        void pop();
-        void pop_relocated();
-        void uninitialized_relocate_top(void *dest);
-
-        template<class T>
-        void push(T &&value)
-        {
-            mem::Forgotten<std::remove_cvref_t<T>> moved(std::forward<T>(value));
-            push(types::typedesc<std::remove_cvref_t<T>>, &moved);
-        }
-
-        template<class T>
-        T &top_as()
-        {
-            return mem::read_as<T>(top());
-        }
-
-        template<class T>
-        const T &top_as() const
-        {
-            return mem::read_as<T>(top());
-        }
-    };
-
     /// @brief A type-erased structure which stores elements of non-homogenous type in sequence.
     /// Values stored and returned from this structure must be destructed by the caller.
+    /// Memory within this structure is never reclaimed once used.
     class ErasedStack
     {
-        // TODO: move away from std::vector, to avoid asan from
-        //       yelling about container breaches; AND fix relocatability.
+        // TODO: once dib::structures::Vector is mature enough, use it instead
+        // TODO: currently, the implementation of this type relies on std::vector to play nice
+        //       with popped values (it will not clean them up, but rather will clobber them later)
+        // TODO: refactor API to 'pop' into external locations rather than returning a pointer to
+        //       potentially invalid memory
         std::vector<uint8_t> buffer;
-
-        enum size_marker : uint8_t
-        {
-            u8,
-            u16,
-            u32,
-            u64
-        };
-
-        /// @brief Helper method to read an object size from the top of the stack
-        /// @param size Used to store the size read
-        /// @return The amount of bytes, not including the marker byte, which this read used
-        size_t read_size(size_t &size) const;
 
     public:
         /// @brief A value stored inside an instance of a stack
         struct Value
         {
-            size_t size;
+            types::TypeDescriptor type;
             void *pointer;
         };
 
-        /// @brief Append a value to this stack by memcpy-ing from the contents.
+        /// Append a value to this stack by memcpy-ing from the contents.
         /// No destruction takes place internally, so contents should either be trivial or
         /// wrapped in a memory::Forgotten and forgotten.
         /// @param size The size, in bytes, of the element being added.
         /// @param contents A pointer to the element.
-        void push(size_t size, const uint8_t *contents);
+        void push(types::TypeDescriptor type, void *contents);
 
-        /// @brief Retrieve an element from this stack without removing it.
+        /// Retrieve an element from this stack without removing it.
         Value top();
 
-        /// @brief Retrieve an element from this stack while permitting the reuse of its memory
-        /// location. Note that no destruction of the element occurs.
-        Value pop();
+        /// Remove the topmost element, calling its destructor in place.
+        void pop();
         
-        /// @brief Templated and reference-friendly version of push
+        /// Remove the topmost element without calling its desructor.
+        void pop_nondestructive();
+        
+        /// Templated and reference-friendly version of push
         template<class T>
         void push(const T &contents)
         {
-            push(sizeof contents, (const uint8_t*) &contents);
+            push(types::typedesc<T>, (void*) &contents);
         }
 
-        /// @brief Templated and reference-friendly version of top
+        /// Templated and reference-friendly version of top
         template<class T>
         T &top_as()
         {
             auto value = top();
-            if (value.size != sizeof(T))
+            if (value.type != types::typedesc<T>)
             {
-                std::cerr << "Invalid read of type " << typeid(T).name() << " from ErasedStack" << std::endl;
-                std::abort();
-            }
-
-            return dib::mem::read_as<T>(value.pointer);
-        }
-        
-        /// @brief Templated and reference-friendly version of pop
-        template<class T>
-        T &pop_as()
-        {
-            auto value = pop();
-            if (value.size != sizeof(T))
-            {
-                std::cerr << "Invalid read of type " << typeid(T).name() << " from ErasedStack" << std::endl;
-                std::abort();
+                RUNTIME_ERROR("Reading incorrect type from erased stack.");
             }
 
             return dib::mem::read_as<T>(value.pointer);
@@ -500,7 +434,13 @@ namespace dib::structures
         }
 
         template<class T>
-        T &get() const {return *(T*)data;}
+        T &get() const 
+        { 
+            if(types::typedesc<T> != type)
+                RUNTIME_ERROR("Attempt to cast a singleton to a type it is not.");
+            
+            return *(T*)data;
+        }
 
         ErasedSingleton(ErasedSingleton &&other) noexcept
         {
@@ -526,5 +466,3 @@ namespace dib::structures
         }
     };
 }
-
-#endif

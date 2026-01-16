@@ -1,19 +1,26 @@
-#ifndef __SPARSE_BITSET_H
-#define __SPARSE_BITSET_H
+#pragma once 
 
 #include <stdint.h>
 #include <stddef.h>
 #include <array>
 #include <memory>
 
-#include "function_util.h"
+#include "dib/types.h"
+#include "dib/functional.h"
+
+// This file contains the definition of a 'sparse bitset', which is
+// a structure which stores a bitset in a sparse manner (bits
+// are packed into 16bit words which are then stored in a sorted list
+// by their 'start index').
 
 namespace dib::structures
 {    
+    /// An iterator into a sparse bitset
     class SparseBitsetIterator;
 
     namespace detail
     {
+        /// An 'entry' within a sparse bitset
         struct SparseBitsetEntry
         {
             uint16_t index;
@@ -29,13 +36,15 @@ namespace dib::structures
             }
         };
 
+        /// A helper type that stores references to allocation functions
         struct EntryAllocatorFuncs
         {
-            dib::functional::StackFunction<SparseBitsetEntry *(size_t)> alloc;
-            dib::functional::StackFunction<void(SparseBitsetEntry *, size_t)> free;
+            dib::functional::FunctionRef<SparseBitsetEntry *(size_t)> alloc;
+            dib::functional::FunctionRef<void(SparseBitsetEntry *, size_t)> free;
         };
         
-        class SparseBitset_Impl
+        /// The base implementation of a sparse bitset, agnostic of allocator
+        class SparseBitset_Impl : public types::HashProvided
         {
         protected:
             // Helper typedefs //
@@ -73,7 +82,7 @@ namespace dib::structures
             SparseBitset_Impl or_with(const SparseBitset_Impl &other, EntryAllocatorFuncs alloc);
             SparseBitset_Impl and_with(const SparseBitset_Impl &other, EntryAllocatorFuncs alloc);
 
-            friend class SparseBitsetIterator;
+            friend class structures::SparseBitsetIterator;
 
         public:
             constexpr static size_t MAX_INDEX = (1 << 16) * 16;
@@ -81,7 +90,7 @@ namespace dib::structures
             SparseBitset_Impl() : stack(), count(0) {}
 
             bool test(size_t value) const;
-            size_t hash() const;
+            size_t get_hash() const;
 
             SparseBitsetIterator begin() const;
             SparseBitsetIterator end() const;
@@ -91,6 +100,10 @@ namespace dib::structures
 
             bool is_subset_of(const SparseBitset_Impl &other) const;
         };
+        
+        static_assert(
+            dib::types::IsHashProvided<SparseBitset_Impl>, 
+            "SparseBitset_Impl should provide hash properly!");
     }
 
     template<class Allocator = std::allocator<detail::SparseBitsetEntry>>
@@ -108,20 +121,21 @@ namespace dib::structures
         {
             return _EntryAllocFns
             {
-                .alloc = {
-                    [](void *env, size_t count) 
+                // TODO: this is janky!
+                .alloc = decltype(_EntryAllocFns::alloc){
+                    [](_EntryAllocator *env, size_t count) 
                     {
-                        return _EntryAllocTraits::allocate(*(_EntryAllocator*)(env), count);
+                        return _EntryAllocTraits::allocate(*env, count);
                     },
-                    (void*)(&allocator)
+                    &allocator
                 },
                 
-                .free = {
-                    [](void *env, Entry *ptr, size_t count) 
+                .free = decltype(_EntryAllocFns::free){
+                    [](_EntryAllocator *env, Entry *ptr, size_t count) 
                     {
-                        return _EntryAllocTraits::deallocate(*(_EntryAllocator*)(env), ptr, count);
+                        return _EntryAllocTraits::deallocate(*env, ptr, count);
                     },
-                    (void*)(&allocator)
+                    &allocator
                 }
             };
         }
@@ -286,17 +300,3 @@ namespace dib::structures
         size_t operator*() const;
     };
 }
-
-namespace std
-{
-    template<class Alloc> 
-    struct hash<dib::structures::SparseBitset_Alloc<Alloc>>
-    {
-        size_t operator()(const dib::structures::SparseBitset_Alloc<Alloc> &bitset) const
-        {
-            return bitset.hash();
-        }
-    };
-}
-
-#endif

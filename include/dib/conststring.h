@@ -7,13 +7,13 @@
 
 namespace dib::strings
 {
-    class string_literal
+    class StringLiteral
     {
         const char *ptr;
         size_t length;
 
     public:
-        consteval string_literal(const char *str)
+        consteval StringLiteral(const char *str)
         {
             ptr = str;
             length = 0;
@@ -22,7 +22,7 @@ namespace dib::strings
                 length++;
         }
 
-        constexpr string_literal()
+        constexpr StringLiteral()
             : ptr(""), length(0)
         {}
 
@@ -43,14 +43,14 @@ namespace dib::strings
         constexpr auto end() const { return c_str() + size(); }
     };
 
-    bool operator==(string_literal, const char *);
-    bool operator==(const char *, string_literal);
+    bool operator==(StringLiteral, const char *);
+    bool operator==(const char *, StringLiteral);
     
     template<size_t N>
-    struct string_const
+    struct StringConst
     {
         char text[N];
-        constexpr string_const(const char (&text)[N])
+        constexpr StringConst(const char (&text)[N])
         {
             for(size_t i = 0; i < N; i++)
                 this->text[i] = text[i];
@@ -68,8 +68,8 @@ namespace dib::strings
         consteval auto end() const { return text + N; }
     };
 
-    template<string_const str>
-    struct string_type
+    template<StringConst str>
+    struct StringType
     {
         consteval const char *c_str() const { return str.c_str(); }
         consteval size_t size() const { return str.size(); }
@@ -79,7 +79,7 @@ namespace dib::strings
         consteval auto begin() const { return str.begin(); }
         consteval auto end() const { return str.end(); }
 
-        consteval bool operator==(string_type) const { return true; }
+        consteval bool operator==(StringType) const { return true; }
         consteval bool operator==(const char *text) const { return text == (std::string_view)str; }
     };
 
@@ -87,12 +87,12 @@ namespace dib::strings
     {
         namespace
         {
-            template<string_const str>
-            string_type<str> operator""_t() { return {}; }
+            template<StringConst str>
+            StringType<str> operator""_t() { return {}; }
         }
     }
 
-    struct transparent_hash
+    struct TransparentHash
     {
     private:
         constexpr size_t get_hash(const char *str) const
@@ -115,8 +115,8 @@ namespace dib::strings
         size_t operator()(const std::string &str) const { return get_hash(str.data()); }
         size_t operator()(const std::string_view &str) const { return get_hash(str.data()); }
 
-        template<string_const str>
-        consteval size_t operator()(string_type<str>) const { return get_hash(str.c_str()); }
+        template<StringConst str>
+        consteval size_t operator()(StringType<str>) const { return get_hash(str.c_str()); }
     };
 }
 

@@ -1,77 +1,32 @@
-#ifndef __ECS_DIB_SYSTEMS_H
-#define __ECS_DIB_SYSTEMS_H
+#pragma once
 
-#include <typeinfo>
-#include <typeindex>
 #include <type_traits>
 #include <concepts>
 #include <vector>
-#include <functional>
 #include <variant>
 #include <memory>
 
 #include "dib/types.h"
-#include "dib/function_util.h"
+#include "dib/functional.h"
 #include "dib/pointers.h"
-#include "dib/raw_memory.h"
-
 #include "dib/ecs/systems_fwd.h"
 #include "dib/ecs/world.h"
+#include "dib/app.fwd.h"
 
 namespace dib::ecs
 {
 	// System function creation //
-	namespace detail
-	{
-		template<class T> struct RetrieveQueryType {};
-		template<class... Comp> struct RetrieveQueryType<Query<Comp...>>
-		{
-			static Query<Comp...> get(World &world) { return world.query<Comp...>(); }
-		};
-
-		template<class T> T retrieve_system_arguments(const Systems &scheduler, World &world)
-		{
-			using T_ = std::remove_cvref_t<T>;
-			#define is(...) (std::is_same_v<T_, __VA_ARGS__>)
-
-			if constexpr (false);
-			else if constexpr is(World) return world;
-			else if constexpr is(Commands) return world.commands();
-			else if constexpr is(Entities) return world.entities();
-			else if constexpr is(Singletons) return world.singletons();
-			else if constexpr is(Messages) return world.messages();
-			else if constexpr is(StateMachine) return world.state_machine();
-			else if constexpr is(Systems) return scheduler;
-			else if constexpr is(resources::Resources) return world.resources();
-			else if constexpr (is_query<T_>) return RetrieveQueryType<T_>::get(world);
-			else return world.get_singleton<T_>();
-
-			#undef is
-		}
-
-		template<class T>
-		constexpr bool is_valid_system_argument = std::is_lvalue_reference_v<T> ^ ecs::is_query<T>;
-	}
-
 	template<class R>
 	struct BasicSystemFn : types::HashProvided
 	{
 	public:
-		template<class... Args> 
-			requires (detail::is_valid_system_argument<Args> && ...)
-		BasicSystemFn(R(&fn)(Args...))
-		{
-			_fn = (void(*)()) &fn;
-			_caller = [](void(*fn)(), const Systems &scheduler, World &world)
-			{
-				auto fnr = (R(*)(Args...)) fn;
-				return fnr(detail::retrieve_system_arguments<Args>(scheduler, world)...);
-			};
-		}
+		BasicSystemFn(R(*fn)())
+			: _fn(fn)
+		{}
 
-		R operator()(const Systems &scheduler, World &world) const
+		R operator()() const
 		{
-			return _caller(_fn, scheduler, world);
+			return _fn();
 		}
 
 		size_t get_hash() const { return dib::get_hash(_fn); }
@@ -79,8 +34,7 @@ namespace dib::ecs
 		bool operator==(const BasicSystemFn &) const = default;
 
 	private:
-		void(*_fn)();
-		R(*_caller)(void(*)(), const Systems &, World &);
+		R(*_fn)();
 	};
 
 	using SystemFn = BasicSystemFn<void>;
@@ -95,27 +49,27 @@ namespace dib::ecs
 
 		struct SystemRunAfter : SystemOption
 		{
-			constexpr SystemRunAfter(SystemAction &&key) : key(std::move(key)) {}
+			constexpr SystemRunAfter(SystemAction &&key) : key(MOVE(key)) {}
 			SystemAction key;
 		};
 		struct SystemRunBefore : SystemOption
 		{
-			constexpr SystemRunBefore(SystemAction &&key) : key(std::move(key)) {}
+			constexpr SystemRunBefore(SystemAction &&key) : key(MOVE(key)) {}
 			SystemAction key;
 		};
 		struct SystemRunIf : SystemOption
 		{
-			SystemRunIf(SystemPred &&pred) : pred(std::move(pred)) {}
+			SystemRunIf(SystemPred &&pred) : pred(MOVE(pred)) {}
 			SystemPred pred;
 		};
 		struct SystemInitWith : SystemOption
 		{
-			constexpr SystemInitWith(SystemFn &&fn) : fn(std::move(fn)) {}
+			constexpr SystemInitWith(SystemFn &&fn) : fn(MOVE(fn)) {}
 			SystemFn fn;
 		};
 		struct SystemDeinitWith : SystemOption
 		{
-			constexpr SystemDeinitWith(SystemFn &&fn) : fn(std::move(fn)) {}
+			constexpr SystemDeinitWith(SystemFn &&fn) : fn(MOVE(fn)) {}
 			SystemFn fn;
 		};
 
@@ -126,13 +80,13 @@ namespace dib::ecs
 			RHS right;
 
 			constexpr SystemMergedOption(LHS &&left, RHS &&right)
-				: left(std::move(left)), right(std::move(right))
+				: left(MOVE(left)), right(MOVE(right))
 			{}
 			constexpr SystemMergedOption(const LHS &left, RHS &&right)
-				: left(left), right(std::move(right))
+				: left(left), right(MOVE(right))
 			{}
 			constexpr SystemMergedOption(LHS &&left, const RHS &right)
-				: left(std::move(left)), right(right)
+				: left(MOVE(left)), right(right)
 			{}
 			constexpr SystemMergedOption(const LHS &left, const RHS &right)
 				: left(left), right(right)
@@ -141,46 +95,44 @@ namespace dib::ecs
 
 		constexpr auto operator|(std::derived_from<SystemOption> auto &&lhs, std::derived_from<SystemOption> auto &&rhs)
 		{
-			return SystemMergedOption { std::forward<decltype(lhs)>(lhs), std::forward<decltype(rhs)>(rhs) };
+			return SystemMergedOption { FORWARD(lhs), FORWARD(rhs) };
 		}
 		constexpr auto operator|(std::derived_from<SystemOption> auto &lhs, std::derived_from<SystemOption> auto &&rhs)
 		{
-			return SystemMergedOption{ std::forward<decltype(lhs)>(lhs), std::forward<decltype(rhs)>(rhs) };
+			return SystemMergedOption{ FORWARD(lhs), FORWARD(rhs) };
 		}
 		constexpr auto operator|(std::derived_from<SystemOption> auto &&lhs, std::derived_from<SystemOption> auto &rhs)
 		{
-			return SystemMergedOption{ std::forward<decltype(lhs)>(lhs), std::forward<decltype(rhs)>(rhs) };
+			return SystemMergedOption{ FORWARD(lhs), FORWARD(rhs) };
 		}
 	}
 
 	namespace options
 	{
-		inline detail::SystemRunAfter after(SystemAction &&action) { return { std::move(action) }; }
-		inline detail::SystemRunBefore before(SystemAction &&action) { return { std::move(action) }; }
-		inline detail::SystemRunIf run_if(SystemPred &&pred) { return { std::move(pred) }; }
-		inline detail::SystemInitWith init_with(SystemFn &&fn) { return { std::move(fn) }; }
-		inline detail::SystemDeinitWith deinit_with(SystemFn &&fn) { return { std::move(fn) }; }
+		inline detail::SystemRunAfter after(SystemAction &&action) { return { MOVE(action) }; }
+		inline detail::SystemRunBefore before(SystemAction &&action) { return { MOVE(action) }; }
+		inline detail::SystemRunIf run_if(SystemPred &&pred) { return { MOVE(pred) }; }
+		inline detail::SystemInitWith init_with(SystemFn &&fn) { return { MOVE(fn) }; }
+		inline detail::SystemDeinitWith deinit_with(SystemFn &&fn) { return { MOVE(fn) }; }
 	}
 
 	// System class and methods //
 	struct System
 	{
-		System() = default;
-
-		System(SystemGroup group, SystemAction &&action)
-			: group(group), action(std::move(action))
+		System(SystemGroup group, auto &&action)
+			: group(group), action(FORWARD(action))
 		{}
 
-		template<std::derived_from<detail::SystemOption> Opt>
+		template<types::IsDerivedFrom<detail::SystemOption> Opt>
 		System(SystemGroup group, SystemAction &&action, Opt &&opt)
-			: System(group, std::move(action))
+			: System(group, MOVE(action))
 		{
-			option(std::forward<Opt>(opt));
+			option(FORWARD(opt));
 		}
 
-		template<std::derived_from<detail::SystemOption> Opt>
+		template<types::IsDerivedFrom<detail::SystemOption> Opt>
 		System(SystemGroup group, SystemAction &&action, const Opt &opt)
-			: System(group, std::move(action))
+			: System(group, MOVE(action))
 		{
 			option(opt);
 		}
@@ -199,20 +151,20 @@ namespace dib::ecs
 
 		SystemGroup group;
 		SystemAction action;
-		functional::Multievent<const Systems &, World &> init;
-		functional::Multievent<const Systems &, World &> deinit;
-		functional::Multipredicate<const Systems &, World &> pred;
+		functional::Multievent<> init;
+		functional::Multievent<> deinit;
+		functional::Multipredicate<> pred;
 		std::vector<SystemAction> order_after;
 		std::vector<SystemAction> order_before;
 
 		int order = 0;
 		ConstructionState order_state = ConstructionState::unstarted;
 
-		void option(detail::SystemRunIf &&r) { pred.append(std::move(r.pred)); }
-		void option(detail::SystemRunAfter &&r) { order_after.push_back(std::move(r.key)); }
-		void option(detail::SystemRunBefore &&r) { order_before.push_back(std::move(r.key)); }
-		void option(detail::SystemInitWith &&r) { init.append(std::move(r.fn)); }
-		void option(detail::SystemDeinitWith &&r) { deinit.append(std::move(r.fn)); }
+		void option(detail::SystemRunIf &&r) { pred.append(MOVE(r.pred)); }
+		void option(detail::SystemRunAfter &&r) { order_after.push_back(MOVE(r.key)); }
+		void option(detail::SystemRunBefore &&r) { order_before.push_back(MOVE(r.key)); }
+		void option(detail::SystemInitWith &&r) { init.append(MOVE(r.fn)); }
+		void option(detail::SystemDeinitWith &&r) { deinit.append(MOVE(r.fn)); }
 
 		void option(const detail::SystemRunIf &r) { pred.append(r.pred); }
 		void option(const detail::SystemRunAfter &r) { order_after.push_back(r.key); }
@@ -221,7 +173,7 @@ namespace dib::ecs
 		void option(const detail::SystemDeinitWith &r) { deinit.append(r.fn); }
 
 		template<class LHS, class RHS>
-		void option(detail::SystemMergedOption<LHS, RHS> &&r) { option(std::move(r.left)); option(std::move(r.right)); }
+		void option(detail::SystemMergedOption<LHS, RHS> &&r) { option(MOVE(r.left)); option(MOVE(r.right)); }
 		template<class LHS, class RHS>
 		void option(const detail::SystemMergedOption<LHS, RHS> &r) { option(r.left); option(r.right); }
 	};
@@ -233,7 +185,7 @@ namespace dib::ecs
 
 		struct SystemGroupInstance
 		{
-			friend struct Systems;
+			friend struct dib::ecs::Systems;
 
 		private:
 			std::unordered_map<SystemAction, std::unique_ptr<System>> _system_map;
@@ -248,12 +200,16 @@ namespace dib::ecs
 
 		void build();
 
-		void execute(World &world, SystemGroup group_id) const;
+		void execute(World &world, SystemGroup group) const;
 
 	private:
 		bool _built = false;
 		std::unordered_map<SystemGroup, detail::SystemGroupInstance> _groups;
 	};
+	
+	template<class ...Args>
+	auto system(Args &&...args)
+	{
+		return System(FORWARD(args)...);
+	}
 }
-
-#endif

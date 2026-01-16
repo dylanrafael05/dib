@@ -1,5 +1,4 @@
-#ifndef __DIBMATH_EXTERNS_H
-#define __DIBMATH_EXTERNS_H
+#pragma once
 
 #define __DIBMATH_INTEGRAL_EXTERNS(...) \
     __func(int, 2, __VA_ARGS__) __func(int, 3, __VA_ARGS__) __func(int, 4, __VA_ARGS__) \
@@ -19,5 +18,3 @@
 
 #define __DIBMATH_ALL_EXTERNS(...) \
     __DIBMATH_SCALAR_EXTERNS(__VA_ARGS__) __DIBMATH_BOOL_EXTERNS(__VA_ARGS__)
-
-#endif

@@ -1,8 +1,8 @@
-#ifndef __DIB_VARS_H
-#define __DIB_VARS_H
+#pragma once
 
 #include <variant>
-#include "dib/optional.h"
+
+#include "dib/option.h"
 #include "dib/types.h"
 
 namespace dib::vars
@@ -12,6 +12,7 @@ namespace dib::vars
     {
         size_t final_val = (size_t)(-1);
         size_t x = 0;
+
         ([&] {
             if constexpr (std::is_same_v<T, Vrs>)
             {
@@ -19,6 +20,7 @@ namespace dib::vars
             }
             x++;
         }(), ...);
+
 
         return final_val;
     }
@@ -42,45 +44,43 @@ namespace dib::vars
     }
 
     template<class T, class... Vrs>
-    constexpr dib::Optional<T&> get_opt(std::variant<Vrs...> &var_like)
+    constexpr dib::option::Option<T&> get_opt(std::variant<Vrs...> &var_like)
     {
         if (is<T>(var_like))
         {
-            return dib::some<T&>(get<T>(var_like));
+            return dib::option::some<T&>(get<T>(var_like));
         }
         else
         {
-            return dib::none;
+            return dib::option::none;
         }
     }
 
     template<class T, class... Vrs>
-    constexpr dib::Optional<const T&> get_opt(const std::variant<Vrs...> &var_like)
+    constexpr dib::option::Option<const T&> get_opt(const std::variant<Vrs...> &var_like)
     {
         return get_opt<T, Vrs...>(types::remove_const(var_like));
     }
 
     template<class T, class... Vrs>
-    constexpr dib::Optional<T &> get_opt_poly(std::variant<Vrs...> &var_like)
+    constexpr dib::option::Option<T &> get_opt_poly(std::variant<Vrs...> &var_like)
     {
         return std::visit([]<class V>(V & val)
         {
             if constexpr (std::is_base_of_v<T, V>)
             {
-                return dib::Optional<T &>(val);
+                return dib::option::Option<T &>(val);
             }
             else
             {
-                return dib::none_of<T &>;
+                return dib::option::none_of<T &>;
             }
         }, var_like);
     }
 
     template<class T, class... Vrs>
-    constexpr dib::Optional<const T &> get_opt_poly(const std::variant<Vrs...> &var_like)
+    constexpr dib::option::Option<const T &> get_opt_poly(const std::variant<Vrs...> &var_like)
     {
         return get_opt_poly<T, Vrs...>(dib::types::remove_const(var_like));
     }
 }
-
-#endif

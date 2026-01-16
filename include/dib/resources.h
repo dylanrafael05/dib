@@ -1,17 +1,17 @@
-#ifndef __RESOURCES_H
-#define __RESOURCES_H
+#pragma once
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <unordered_map>
 #include <string_view>
-#include <memory>
 #include <vector>
-#include <exception>
 #include <list>
 #include <typeindex>
 
-#include "raw_memory.h"
+#include "dib/json.h"
+#include "dib/types.h"
+
 #include "raylib.h"
 
 namespace dib::resources
@@ -44,33 +44,44 @@ namespace dib::resources
         {
             write_big_endian(stream, (const char*)buffer, sizeof(T));
         }
+
+        unsigned char *file_load_data_callback(const char *filename, int *bytes_read);
+        char *file_load_text_callback(const char *filename);
     }
 
-    class ResourceException : std::runtime_error
-    {
-        using std::runtime_error::runtime_error;
-    };
+    constexpr std::string_view raylib_resources = "resources/";
     
+    /// Forward declare all the core resource types
+    class Resources;
+    class ResourceStore;
+    class ResourceFolder;
+    class ResourceBatch;
+    template<class>
+    class ResourceHandle;
+    
+    /// The interface which resource types must provide.
     template<class T>
     struct ResourceInterface
     {
-        static void load(T &instance, std::string_view filename, const char *buffer, size_t size) {}
-        static void unload(T &instance) {}
-        static constexpr bool shrink_on_construction = false;
+        static void load(Resources &resources, T &instance, std::string_view filename, const char *buffer, size_t size) {}
+        static void unload(Resources &resources, T &instance) {}
+        static constexpr bool free_underlying_once_loaded = false;
 
         using disable = void;
     };
 
+    /// A class which provides easy access to information about a resource type,
+    /// and provides reasonable defaults if a field is ommitted.
     template<class T>
     struct ResourceTraits
     {
         static_assert(!requires {typename ResourceInterface<T>::disable;}, "Cannot get the resource traits of a non-resource type!");
 
-        static constexpr bool shrink_on_construction = []
+        static constexpr bool free_underlying_once_loaded = []
         {
-            if constexpr(requires {{ResourceInterface<T>::shrink_on_construction} -> std::same_as<bool>;})
+            if constexpr(requires {{ResourceInterface<T>::free_underlying_once_loaded} -> std::same_as<bool>;})
             {
-                return ResourceInterface<T>::shrink_on_construction;
+                return ResourceInterface<T>::free_underlying_once_loaded;
             }
             else 
             {
@@ -90,99 +101,216 @@ namespace dib::resources
             }
         }();
 
-        static void load(T &instance, std::string_view filename, const char *buffer, size_t size)
+        static void load(Resources &resources, T &instance, std::string_view filename, const char *buffer, size_t size)
         {
-            if constexpr(requires {{ResourceInterface<T>::load(instance, filename, buffer, size)} -> std::same_as<void>;})
+            if constexpr(requires {{ResourceInterface<T>::load(resources, instance, filename, buffer, size)} -> std::same_as<void>;})
             {
-                ResourceInterface<T>::load(instance, filename, buffer, size);
+                ResourceInterface<T>::load(resources, instance, filename, buffer, size);
             }
         }
         
-        static void unload(T &instance)
+        static void unload(Resources &resources, T &instance)
         {
-            if constexpr(requires {{ResourceInterface<T>::unload(instance)} -> std::same_as<void>;})
+            if constexpr(requires {{ResourceInterface<T>::unload(resources, instance)} -> std::same_as<void>;})
             {
-                ResourceInterface<T>::unload(instance);
+                ResourceInterface<T>::unload(resources, instance);
             }
         }
     };
 
-    class Resource
+    namespace detail
     {
-        std::type_index _type;
-        size_t _re_size;
-        char *_data;
-        void (*_destructor)(void *);
+        dib::resources::ResourceStore *global_resource_store();
 
-        void move_from(Resource &&other);
-        void destruct();
-
-        void shrink();
-
-        template<class T>
-        static Resource load_from(std::string_view filename, char *buffer, size_t file_size)
+        /// The handle of a resource that has been loaded.
+        class LoadedResource
         {
-            new(buffer) T();
-            Resource out(typeid(T), sizeof(T), buffer, [](void *p) 
+            Resources *_owner;
+            std::type_index _type;
+            size_t _re_size;
+            char *_data;
+            void (*_destructor)(Resources &, void *);
+
+            void move_from(LoadedResource &&other);
+            void destruct();
+
+            void free_underlying_buffer();
+
+            template<class T>
+            static LoadedResource load_with_type(Resources &owner, std::string_view filename, char *buffer, size_t file_size)
             {
-                ResourceTraits<T>::unload(*(T*)p);
-                ((T*)p)->~T();
-            });
+                new(buffer) T();
+                LoadedResource out(owner, typeid(T), sizeof(T), buffer, [](Resources &owner, void *p) 
+                {
+                    ResourceTraits<T>::unload(owner, *(T*)p);
+                    ((T*)p)->~T();
+                });
 
-            ResourceTraits<T>::load(*(T*)buffer, filename, buffer + sizeof(T), file_size);
+                ResourceTraits<T>::load(owner, *(T*)buffer, filename, buffer + sizeof(T), file_size);
+                return out;
+            }
 
-            return out;
-        }
+            LoadedResource(Resources &resources, std::type_index type, size_t re_size, char *data, void (*destructor)(Resources &, void *));
 
-        Resource(std::type_index type, size_t re_size, char *data, void (*destructor)(void *));
+        public:
+            LoadedResource();
+            LoadedResource(LoadedResource &&other) noexcept;
+
+            ~LoadedResource();
+
+            LoadedResource &operator=(LoadedResource &&other) noexcept;
+
+            friend class dib::resources::ResourceStore;
+            friend class dib::resources::ResourceBatch;
+            friend class dib::resources::ResourceFolder;
+            template<class>
+            friend class dib::resources::ResourceHandle;
+        };
+    }
+
+    /// A handle to a resource. Can perform either dynamic reloading or cached lookup
+    /// depending on whether or not the resource storage system supports dynamic reloading
+    /// of assets. Is also json serializable.
+    template<class T>
+    class ResourceHandle : json::ProvidedJsonInterface
+    {
+        Resources *_owner;
+        std::string_view _name;
+        mutable const T *_cached;
+
+        friend class dib::resources::ResourceStore;
+        friend class dib::resources::Resources;
+        
+        ResourceHandle(Resources &owner, std::string_view name);
 
     public:
-        Resource();
-        Resource(Resource &&other) noexcept;
 
-        ~Resource();
+        std::string_view name() const { return _name; }
 
-        Resource &operator=(Resource &&other) noexcept;
+        const T &get() const;
 
-        friend class Resources;
-        friend class ResourceBatch;
-        friend class ResourceFolder;
+        const T &operator* () const { return get(); }
+        const T *operator->() const { return std::addressof(get()); }
 
-        template<class T>
-        const T &as() const
+        void handle_json(json::Json &&js)
         {
-        #ifndef NDEBUG
-
-            if(_type != typeid(T))
-            {
-                std::cerr << "Attempt to access a resource with incorrect datatype." << std::endl;
-                std::abort();
-            }
-
-        #endif
-
-            return *(T*)_data;
+            js.val(
+                *this, 
+                [](std::string_view str) { 
+                    return ResourceHandle<T>(
+                        detail::global_resource_store(), 
+                        //!WARNING! This undermines the idea of having multiple Resources instances!
+                        str
+                    ); 
+                },
+                [](const ResourceHandle<T> &handle) { return handle._name; }
+            );
         }
     };
 
+    /// The base class for all resource storage operations.
+    class ResourceStore
+    {
+        template<class>
+        friend class dib::resources::ResourceHandle;
+        friend class dib::resources::Resources;
+
+    protected:
+        using Loader = detail::LoadedResource(*)(Resources &owner, std::string_view filename, char *buffer, size_t size);
+        virtual const detail::LoadedResource &get_loaded(
+            std::string_view name, Loader loader, size_t re_size, bool free_underlying_once_loaded, bool open_as_text) = 0;
+
+        Resources *_owner;
+        
+        void set_owner(Resources &owner);
+
+    public:
+        virtual ~ResourceStore() {}
+        virtual bool supports_dynamic_reload() const = 0;
+        virtual size_t get_content_size(std::string_view filename) const = 0;
+        virtual void copy_content_to_buffer(std::string_view filename, void *buffer, bool open_as_text) const = 0;
+    };
+
+    /// The class responsible for the public-facing resources API.
     class Resources
     {
-    protected:
-        using Loader = Resource(*)(std::string_view filename, char *buffer, size_t size);
-        virtual const Resource &get(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) = 0;
+        std::unique_ptr<ResourceStore> _store;
+
+        void assert_initialized() const;
 
     public:
-        virtual ~Resources() {}
+        void set_store(std::unique_ptr<ResourceStore> &&store)
+        {
+            _store = MOVE(store);
+            _store->set_owner(*this);
+        }
+
+        ResourceStore &store() 
+        { 
+            assert_initialized();
+            return *_store; 
+        }
+        
+        const ResourceStore &store() const
+        {
+            assert_initialized();
+            return *_store; 
+        }
+
+        bool supports_dynamic_reload() const
+        {
+            return store().supports_dynamic_reload();
+        }
 
         template<class T>
-        const T &get(std::string_view name)
+        ResourceHandle<T> get(std::string_view name)
         {
-            auto &resource = get(name, &Resource::load_from<T>, sizeof(T), ResourceTraits<T>::shrink_on_construction, ResourceTraits<T>::open_as_text);
-            return resource.template as<T>();
+            assert_initialized();
+            return ResourceHandle<T>(*this, name);
         }
     };
 
-    class ResourceBatch final : public Resources
+    template<class T>
+    ResourceHandle<T>::ResourceHandle(Resources &owner, std::string_view name)
+        : _owner(&owner)
+        , _name(name)
+        , _cached(nullptr)
+    {
+        if(_owner->supports_dynamic_reload())
+        {
+            get();
+        }
+    }
+
+    template<class T>
+    const T &ResourceHandle<T>::get() const
+    {
+        if(_cached)
+            return *_cached;
+
+        auto &resource = _owner->store().get_loaded(
+            _name, 
+            &detail::LoadedResource::load_with_type<T>, 
+            sizeof(T), 
+            ResourceTraits<T>::free_underlying_once_loaded, 
+            ResourceTraits<T>::open_as_text);
+            
+        if(resource._type != typeid(T))
+        {
+            RUNTIME_ERROR(std::format(
+                "Resource {} is of type {}, but is being read as type {}", 
+                _name, resource._type.name(), types::typedesc<T>.name()));
+        }
+
+        if(!_owner->supports_dynamic_reload())
+        {
+            _cached = (const T*)resource._data;
+        }
+
+        return *_cached;
+    }
+
+    class ResourceBatch final : public ResourceStore
     {
         // FILE FORMAT //
 
@@ -201,40 +329,49 @@ namespace dib::resources
 
         std::list<std::string> name_storage;
         std::unordered_map<std::string_view, detail::ResourceKey> resource_keys;
-        std::vector<Resource> loaded_resources;
-        std::fstream file;
+        std::vector<detail::LoadedResource> loaded_resources;
+        mutable std::fstream file;
 
         void parse_header();
         
         ResourceBatch(std::fstream &&file)
         {
-            this->file = std::move(file);
+            this->file = MOVE(file);
             parse_header();
         }
 
     protected:
-        const Resource &get(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) override;
+        const detail::LoadedResource &get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) override;
 
     public:
         ResourceBatch() {}
 
         static void make_from_directory(const std::filesystem::path &directory, const std::filesystem::path &output);
         void open(const std::filesystem::path &file);
+        
+        size_t get_content_size(std::string_view filename) const override;
+        void copy_content_to_buffer(std::string_view filename, void *buffer, bool open_as_text) const override;
+        bool supports_dynamic_reload() const override { return false; }
     };
 
-    class ResourceFolder final : public Resources
+    class ResourceFolder final : public ResourceStore
     {
         std::list<std::string> name_storage;
-        std::unordered_map<std::string_view, Resource> loaded_resources;
+        std::unordered_map<std::string_view, detail::LoadedResource> loaded_resources;
+        std::unordered_map<std::string_view, std::chrono::milliseconds> resource_time_of_load;
         std::filesystem::path folder;
 
     protected:
-        const Resource &get(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) override;
+        const detail::LoadedResource &get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) override;
 
     public:
         ResourceFolder(std::filesystem::path folder)
             : folder(folder)
         {}
+        
+        size_t get_content_size(std::string_view filename) const override;
+        void copy_content_to_buffer(std::string_view filename, void *buffer, bool open_as_text) const override;
+        bool supports_dynamic_reload() const override { return true; }
     };
 
     std::filesystem::path resource_batch_location();
@@ -256,41 +393,80 @@ namespace dib::resources
         const char *c_str() const;
     };
 
+    /// Helper resource class which is defined using a JSON,
+    /// which is then deserialized upon loading.
+    template<class Self>
+    class JsonResource : json::ProvidedJsonInterface
+    {};
+
+    template<class T>
+    concept IsJsonResource = types::IsDerivedFrom<T, JsonResource<T>>;
+
     // Default implementations of ResourceInterface //
     template<> struct ResourceInterface<Text>
     {
-        static void load(Text &instance, std::string_view filename, const char *buffer, size_t size);
+        static void load(Resources &resources, Text &instance, std::string_view filename, const char *buffer, size_t size);
 
+        static constexpr bool open_as_text = true;
+    };
+
+    template<IsJsonResource T>
+    struct ResourceInterface<T>
+    {
+        static_assert(json::HasCustomInterface<T>, "JsonResources must correctly provide a json interface");
+
+        static void load(Resources &resources, T &instance, std::string_view filename, const char *buffer, size_t size)
+        {
+            std::stringstream buffer_stream(buffer);
+            json::JsonReader json_read(buffer_stream);
+
+            json_read.read(instance);
+        }
+
+        static constexpr bool free_underlying_once_loaded = true;
         static constexpr bool open_as_text = true;
     };
     
     template<> struct ResourceInterface<::Image>
     {
-        static void load(::Image &instance, std::string_view filename, const char *buffer, size_t size);
-        static void unload(::Image &instance);
+        static void load(Resources &resources, ::Image &instance, std::string_view filename, const char *buffer, size_t size);
+        static void unload(Resources &resources, ::Image &instance);
         
-        static constexpr bool shrink_on_construction = true;
+        static constexpr bool free_underlying_once_loaded = true;
     };
     
     template<> struct ResourceInterface<::Texture>
     {
-        static void load(::Texture &instance, std::string_view filename, const char *buffer, size_t size);
-        static void unload(::Texture &instance);
+        static void load(Resources &resources, ::Texture &instance, std::string_view filename, const char *buffer, size_t size);
+        static void unload(Resources &resources, ::Texture &instance);
         
-        static constexpr bool shrink_on_construction = true;
+        static constexpr bool free_underlying_once_loaded = true;
     };
     
     template<> struct ResourceInterface<::Music>
     {
-        static void load(::Music &instance, std::string_view filename, const char *buffer, size_t size);
-        static void unload(::Music &instance);
+        static void load(Resources &resources, ::Music &instance, std::string_view filename, const char *buffer, size_t size);
+        static void unload(Resources &resources, ::Music &instance);
     };
     
     template<> struct ResourceInterface<::Sound>
     {
-        static void load(::Sound &instance, std::string_view filename, const char *buffer, size_t size);
-        static void unload(::Sound &instance);
+        static void load(Resources &resources, ::Sound &instance, std::string_view filename, const char *buffer, size_t size);
+        static void unload(Resources &resources, ::Sound &instance);
+    };
+    
+    template<> struct ResourceInterface<::Model>
+    {
+        static void load(Resources &resources, ::Model &instance, std::string_view filename, const char *buffer, size_t size);
+        static void unload(Resources &resources, ::Model &instance);
+    };
+    
+    template<> struct ResourceInterface<::Shader>
+    {
+        static void load(Resources &resources, ::Shader &instance, std::string_view filename, const char *buffer, size_t size);
+        static void unload(Resources &resources, ::Shader &instance);
+
+        static constexpr bool open_as_text = true;
+        static constexpr bool free_underlying_once_loaded = true;
     };
 }
-
-#endif

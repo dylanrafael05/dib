@@ -1,12 +1,10 @@
-#ifndef __DIB_ECS_WORLD_H
-#define __DIB_ECS_WORLD_H
+#pragma once
 
-#include "components.h"
-#include "singletons.h"
-#include "world_fwd.h"
-#include "state_machine.h"
+#include "dib/ecs/components.h"
+#include "dib/ecs/singletons.h"
+#include "dib/ecs/world_fwd.h"
+#include "dib/ecs/state_machine.h"
 #include "dib/resources.h"
-#include "dib/pointers.h"
 
 namespace dib::ecs
 {
@@ -15,11 +13,12 @@ namespace dib::ecs
 		private Singletons,
 		private Messages,
 		private StateMachine,
-		private Commands
+		private Commands,
+		private resources::Resources
 	{
 	public:
 		World() 
-			: Entities(), Singletons(), Messages(), StateMachine(this), Commands(this), _resource_manager(nullptr) {}
+			: Entities(), Singletons(), Messages(), StateMachine(this), Commands(this) {}
 		World(const World &) = delete;
 		World(World &&) = delete;
 
@@ -34,15 +33,15 @@ namespace dib::ecs
 		const StateMachine &state_machine() const { return *this; }
 		Commands &commands() { return *this; }
 		const Commands &commands() const { return *this; }
-		resources::Resources &resources() { return *_resource_manager; }
-		const resources::Resources &resources() const { return *_resource_manager; }
+		resources::Resources &resources() { return *this; }
+		const resources::Resources &resources() const { return *this; }
 
 		// StateMachine //
 		template<class T> bool is_in_state(const T &state) const { return StateMachine::current<T>() == state; }
 		template<class T> const T &current_state() const { return StateMachine::current<T>(); }
 		template<class T> World &init_state(const T &value) { StateMachine::init<T>(value); return *this; }
 
-		// ComponentStorage //
+		// Entities //
 		EntityID create_entity() { return Entities::create_entity(); }
 		template<class T> T &get_component(EntityID id) { return Entities::get_component<T>(id); }
 		template<class T> const T &get_component(EntityID id) const { return Entities::get_component<T>(id); }
@@ -53,24 +52,16 @@ namespace dib::ecs
 		World &destroy_entity(EntityID id) { Entities::destroy_entity(id); return *this; }
 		template<class... Comp> Query<Comp...> query() { return Entities::query<Comp...>(); }
 
-		// SingletonStorage //
+		// Singletons //
 		template<class T, class... Args> World &create_singleton(Args &&...args) { Singletons::create<T>(std::forward<Args>(args)...); return *this; }
 		template<class T, class... Args> T &get_new_singleton(Args &&...args) { return Singletons::get_new<T>(std::forward<Args>(args)...); }
 		template<class T> World &remove_singleton() { Singletons::remove<T>(); return *this; }
 		template<class T> T &get_singleton() { return Singletons::get<T>(); }
 		template<class T> bool has_singleton() { return Singletons::has<T>(); }
 
-		// MessageStorage //
+		// Messages //
 		template<class T> World &send_message(T &&message) { Messages::send(std::forward<T>(message)); return *this; }
 		template<class T> bool has_message() { return Messages::has<T>(); }
 		template<class T> std::optional<T> get_message() { return Messages::get<T>(); }
-
-		// Helpers for system predicates //
-		void set_resource_manager(std::unique_ptr<resources::Resources> &&new_value) { _resource_manager = std::move(new_value); }
-
-	private:
-		std::unique_ptr<resources::Resources> _resource_manager;
 	};
 }
-
-#endif

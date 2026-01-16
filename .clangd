@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-xc++, -std=c++23, -Iinclude, -Isrc, -IC:/raylib/raylib/src]

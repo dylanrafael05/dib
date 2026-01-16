@@ -1,8 +1,14 @@
 #include "dib/app.h"
+#include "dib/ecs/systems_fwd.h"
 #include "dib/env.h"
+#include "raylib.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wenum-compare"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
+#pragma GCC diagnostic pop
 
 using namespace dib;
 using namespace dib::app;
@@ -50,6 +56,10 @@ void App::run()
     InitWindow(window_width, window_height, title.c_str());
     SetTargetFPS(target_fps);
 
+    // Inject our custom resource management into raylib
+    SetLoadFileDataCallback(resources::detail::file_load_data_callback);
+    SetLoadFileTextCallback(resources::detail::file_load_text_callback);
+
     // Build and execute initializer systems //
     systems().execute(world(), ecs::groups::OnInit);
     systems().execute(world(), ecs::groups::Start);
@@ -64,24 +74,24 @@ void App::run()
     systems().execute(world(), ecs::groups::OnDeinit);
 }
 
-App &dib::app::instance()
+App &dib::app::this_app()
 {
     static App app;
     return app;
 }
 
-std::unique_ptr<Resources> dib::app::detail::get_resource_manager(bool use_batch)
+std::unique_ptr<ResourceStore> dib::app::detail::get_resource_manager(bool use_batch)
 {
     if (use_batch)
     {
         auto ret = new ResourceBatch();
         ret->open(resource_batch_location());
 
-        return std::unique_ptr<Resources>(ret);
+        return std::unique_ptr<ResourceStore>(ret);
     }
     else
     {
         auto ret = new ResourceFolder(env::executable_directory_path() / ".." / "resources");
-        return std::unique_ptr<Resources>(ret);
+        return std::unique_ptr<ResourceStore>(ret);
     }
 }

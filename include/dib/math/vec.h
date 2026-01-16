@@ -1,14 +1,13 @@
-#ifndef __DIB_MATH_VEC_H
-#define __DIB_MATH_VEC_H
+#pragma once
 
 #include <stddef.h>
 #include <array>
 #include <cmath>
 
-#include "concept.h"
-#include "externs.h"
-
 #include "raylib.h"
+
+#include "dib/math/concept.h"
+#include "dib/math/externs.h"
 #include "dib/types.h"
 
 namespace dib::math
@@ -312,7 +311,7 @@ namespace dib::math
     #undef __func
 
     // Vector operations //
-    template<concepts::arithmetic T, size_t N>
+    template<concepts::IsArithmetic T, size_t N>
     T dot(vec<T, N> lhs, vec<T, N> rhs)
     {
         T out = 0;
@@ -323,7 +322,7 @@ namespace dib::math
         return out;
     }
 
-    template<concepts::arithmetic T, size_t N>
+    template<concepts::IsArithmetic T, size_t N>
     float length_sq(vec<T, N> value)
     {
         float sum = 0;
@@ -334,7 +333,7 @@ namespace dib::math
         return sum;
     }
     
-    template<concepts::arithmetic T, size_t N>
+    template<concepts::IsArithmetic T, size_t N>
     float length(vec<T, N> value)
     {
         return sqrtf(length_sq(value));
@@ -349,7 +348,7 @@ namespace dib::math
     #undef __func
 
     // Normalization //
-    template<concepts::real T, size_t N>
+    template<concepts::IsReal T, size_t N>
     void normalize_inplace(vec<T, N> &value)
     {
         float length = dib::math::length(value);
@@ -358,7 +357,7 @@ namespace dib::math
             value[i] = static_cast<T>(value[i] / length);
     }
 
-    template<concepts::real T, size_t N>
+    template<concepts::IsReal T, size_t N>
     vec<T, N> normalize(vec<T, N> value)
     {
         vec<T, N> copy = value;
@@ -374,7 +373,7 @@ namespace dib::math
     #undef __func
 
     // Max, min, and clamp //
-    template<concepts::arithmetic T, size_t N>
+    template<concepts::IsArithmetic T, size_t N>
     vec<T, N> max(vec<T, N> lhs, vec<T, N> rhs)
     {
         vec<T, N> out;
@@ -385,7 +384,7 @@ namespace dib::math
         return out;
     }
     
-    template<concepts::arithmetic T, size_t N>
+    template<concepts::IsArithmetic T, size_t N>
     vec<T, N> min(vec<T, N> lhs, vec<T, N> rhs)
     {
         vec<T, N> out;
@@ -396,7 +395,7 @@ namespace dib::math
         return out;
     }
     
-    template<concepts::arithmetic T, size_t N>
+    template<concepts::IsArithmetic T, size_t N>
     vec<T, N> clamp(vec<T, N> val, vec<T, N> min, vec<T, N> max)
     {
         vec<T, N> out;
@@ -416,7 +415,7 @@ namespace dib::math
     #undef __func
 
     // Lerp //
-    template<concepts::real T, size_t N>
+    template<concepts::IsReal T, size_t N>
     vec<T, N> lerp(vec<T, N> start, vec<T, N> end, float t)
     {
         if(t == 0) return start;
@@ -430,7 +429,7 @@ namespace dib::math
         return out;
     }
 
-    template<concepts::real T, size_t N>
+    template<concepts::IsReal T, size_t N>
     vec<T, N> clerp(vec<T, N> start, vec<T, N> end, vec<float, N> t)
     {
         vec<T, N> out;
@@ -488,5 +487,3 @@ namespace std
     template<class T, size_t N> struct tuple_size<dib::math::vec<T, N>> {constexpr static size_t value = N;};
     template<class T, size_t N, size_t I> struct tuple_element<I, dib::math::vec<T, N>> {using type = T;};
 }
-
-#endif

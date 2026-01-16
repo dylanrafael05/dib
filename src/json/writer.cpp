@@ -31,7 +31,7 @@ void JsonWriter::start_value_pre()
 {
     if(_needs_key)
     {
-        throw JsonException("Expected a key for the current json object.");
+        RUNTIME_ERROR("Json exception: expected a key for the current json object.");
     }
 
     if(!_collections.empty() && _collections.top().after_first_object && !_collections.top().is_object)
@@ -136,7 +136,7 @@ JsonWriter &JsonWriter::write_key(std::string_view value)
 {
     if(!_needs_key)
     {
-        throw JsonException("Unexpected key.");
+        RUNTIME_ERROR("Json exception: unexpected key.");
     }
 
     _needs_key = false;
@@ -185,7 +185,7 @@ JsonWriter &JsonWriter::write_end_object()
 {
     if(_collections.empty() || !_collections.top().is_object)
     {
-        throw JsonException("Cannot end an object which has not yet been created.");
+        RUNTIME_ERROR("Json exception: cannot end an object which has not yet been created.");
     }
     
     _indent--;
@@ -223,7 +223,7 @@ JsonWriter &JsonWriter::write_end_array()
 {
     if(_collections.empty() || _collections.top().is_object)
     {
-        throw JsonException("Cannot end an array which has not yet been created.");
+        RUNTIME_ERROR("Json exception: cannot end an array which has not yet been created.");
     }
 
     _indent--;

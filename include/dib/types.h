@@ -1,8 +1,9 @@
-#ifndef __DIB_TYPE_TRAITS_H
-#define __DIB_TYPE_TRAITS_H
+#pragma once
 
+#include <concepts>
 #include <type_traits>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 #include <array>
 #include <string>
@@ -14,30 +15,32 @@
 
 namespace dib
 {
+	/// Create a copy of the provided value, via the copy constructor.
 	template<class T>
 	constexpr std::remove_cvref_t<T> copy(T &&value)
 	{
 		return (std::remove_cvref_t<T>)value;
 	}
 
+	/// Create a copy of the provided value allocated on the heap, via the copy constructor.
 	template<class T>
 	constexpr std::remove_cvref_t<T> *copy_new(T &&value)
 	{
 		return new std::remove_cvref_t<T>(value);
 	}
 
-	template<class T>
-	constexpr decltype(auto) demove(T &&value)
+	/// Transform to a non-r-value reference
+	constexpr decltype(auto) demove(auto &&value)
 	{
 		if constexpr (std::is_rvalue_reference_v<decltype(value)>)
 		{
-			return copy(DIB_FWD(value));
+			return copy(FORWARD(value));
 		}
 		else return value;
 	}
 
-	template<class A, class B>
-	constexpr bool ref_equal(A &&a, B &&b)
+	/// Check if two references refer to the same memory location
+	constexpr bool ref_equal(auto &&a, auto &&b)
 	{
 		return ((char *)(void *)&a) == ((char *)(void *)&b);
 	}
@@ -55,19 +58,43 @@ namespace dib::types
 	template<class T>
 	constexpr const T &add_const(const T &val) { return val; }
 
-	template<class T, class V>
-	concept cvref_eq = std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<V>>;
+	/// Concept aliases
 
 	template<class T, class Base>
-	concept not_derived_from = !std::derived_from<T, Base>;
+	concept IsDerivedFrom = std::derived_from<T, Base>;
 	template<class T, class V>
-	concept not_same_as = !std::same_as<T, V>;
+	concept IsSameAs = std::same_as<T, V>;
+    template<class LHS, class RHS>
+    concept IsValueSame = IsSameAs<std::remove_cvref_t<LHS>, std::remove_cvref_t<RHS>>;
 	template<class T, class V>
-	concept not_cvref_eq = !cvref_eq<T, V>;
-	template<class From, class To>
-	concept not_convertible_to = !std::convertible_to<From, To>;
+	concept IsCVRefEq = IsSameAs<std::remove_cvref_t<T>, std::remove_cvref_t<V>>;
+	template<class T, class V>
+	concept IsConvertibleTo = std::convertible_to<T, V>;
 	template<class T>
-	concept not_void = !std::is_void_v<T>;
+	concept IsVoid = std::is_void_v<T>;
+	template<class T>
+	concept IsZST = std::is_void_v<T> || std::is_empty_v<T>;
+	template<class T>
+	concept IsSized = !IsZST<T>;
+	template<class T>
+	concept IsEnum = std::is_enum_v<T>;
+
+	template<class T, class Base>
+	concept NotDerivedFrom = !IsDerivedFrom<T, Base>;
+	template<class T, class V>
+	concept NotSameAs = !IsSameAs<T, V>;
+    template<class LHS, class RHS>
+    concept NotValueSame = !std::same_as<std::remove_cvref_t<LHS>, std::remove_cvref_t<RHS>>;
+	template<class T, class V>
+	concept NotCVRefEq = !IsCVRefEq<T, V>;
+	template<class From, class To>
+	concept NotConvertibleTo = !IsConvertibleTo<From, To>;
+	template<class T>
+	concept NotVoid = !IsVoid<T>;
+	template<class T>
+	concept NotEnum = !IsEnum<T>;
+
+	/// Custom metaclasses
 
 	template<class From, class To>
 	struct CopyConstType { using type = std::remove_const_t<To>; };
@@ -75,13 +102,27 @@ namespace dib::types
 	struct CopyConstType<const From, To> { using type = std::add_const_t<To>; };
 
 	template<class From, class To>
-	using copy_const_t = CopyConstType<From, To>::type;
+	using CopyConst = CopyConstType<From, To>::type;
+	
+	template<class From, class To>
+	struct CopyRefType { using type = std::remove_reference_t<To>; };
+	template<class From, class To>
+	struct CopyRefType<From &, To> { using type = std::add_lvalue_reference_t<To>; };
+	template<class From, class To>
+	struct CopyRefType<From &&, To> { using type = std::add_rvalue_reference_t<To>; };
+	
+	template<class From, class To>
+	using CopyRef = CopyRefType<From, To>::type;
+	template<class From, class To>
+	using CopyConstRef = CopyRef<From, CopyConst<std::remove_reference_t<From>, To>>;
 
 	// Perfect marker types; implements comparison operators only for
 	// the marker type itself, while deleting comparison with other object
 	// types. This makes it so that comparisons can be defaulted in derived
 	// classes, and that the default 'always true' comparison of the marker
-	// type is not callable with derived classes.
+	// type is not callable with derived classes. Note this if this was omitted,
+	// classes which derive from the marker classes would not be able to default
+	// comparisons or would do so in an incorrect manner.
 	template<class Self>
 	struct Marker {};
 
@@ -90,19 +131,35 @@ namespace dib::types
 	template<class Mark> requires std::derived_from<Mark, Marker<Mark>>
 	constexpr auto operator<=>(const Mark &, const Mark &) noexcept { return std::strong_ordering::equal; }
 
-	template<class Mark, not_same_as<Mark> Other> requires std::derived_from<Mark, Marker<Mark>>
+	template<class Mark, NotSameAs<Mark> Other> requires std::derived_from<Mark, Marker<Mark>>
 	void operator==(const Mark &, const Other &) = delete;
-	template<class Mark, not_same_as<Mark> Other> requires std::derived_from<Mark, Marker<Mark>>
+	template<class Mark, NotSameAs<Mark> Other> requires std::derived_from<Mark, Marker<Mark>>
 	void operator<=>(const Mark &, const Other &) = delete;
 
 	// Custom marker types //
+
+	/// A type that provides the std::hash functionality via a member .get_hash()
+	/// should inherit this type.
+	struct HashProvided : Marker<HashProvided> {};
+
+	template<class T>
+	concept IsHashProvided = IsDerivedFrom<T, HashProvided> && requires(const T &t) 
+	{ 
+		{ t.get_hash() } -> IsSameAs<size_t>; 
+	};
+	
+	/// A type should be marked as trivially relocatable if it can be copied
+	/// from one memory location to another without creating logical errors;
+	/// this is typically the case of all types, except if an associated 
+	/// heap-bound object points to the object being moved (as in some 
+	/// implementations of std::list<>).
 	struct TriviallyRelocatable : Marker<TriviallyRelocatable> {};
 
 	template<bool> struct TriviallyRelocatableIf : TriviallyRelocatable {};
 	template<> struct TriviallyRelocatableIf<false> {};
 
-	struct HashProvided : Marker<HashProvided> {};
-
+	/// A metaclass for trivially relocatable types; see dib::types::TrviallyRelocatable
+	/// for more information about relocatable types.
 	template<class T>
 	struct IsTriviallyRelocatableType
 	{
@@ -111,25 +168,39 @@ namespace dib::types
 
 	template<class T>
 	constexpr bool is_trivially_relocatable = IsTriviallyRelocatableType<T>::value;
+	template<class T>
+	concept IsTriviallyRelocatable = is_trivially_relocatable<T>;
 
 	template<class T>
 	constexpr bool is_relocatable = is_trivially_relocatable<T> || std::is_move_constructible_v<T>;
+	template<class T>
+	concept IsRelocatable = is_relocatable<T>;
 }
 
 namespace dib
 {
+	/// Produce a hash for multiple objects.
 	size_t get_hash(auto &&...obj) requires (sizeof...(obj) != 0)
 	{
 		size_t hash_salt = 43;
 		return ((std::hash<std::remove_cvref_t<decltype(obj)>>{}(obj) + (hash_salt += 71, hash_salt *= 23)) ^ ...);
 	}
 
+	/// Relocate an object from a source to an uninitialized destination;
+	/// equivalent to a memmove when type is relocatable, otherwise the same as a move construction
 	template<class T>
 	T *uninitialized_relocate(T *source, T *dest)
 	{
 		if constexpr (types::is_trivially_relocatable<T>)
 		{
+			#ifdef __GNUC__
+			#pragma GCC diagnostic push
+			#pragma GCC diagnostic ignored "-Wclass-memaccess"
+			#endif
 			std::memmove(dest, source, sizeof(T));
+			#ifdef __GNUC__
+			#pragma GCC diagnostic pop
+			#endif
 		}
 		else
 		{
@@ -139,12 +210,21 @@ namespace dib
 		return dest;
 	}
 
+	/// Relocate an array of objects from a source to an uninitialized destination;
+	/// equivalent to a memmove when type is relocatable, otherwise the same as std::uninitialized_move_n
 	template<class T>
 	T *uninitialized_relocate_n(T *source, size_t n, T *dest)
 	{
 		if constexpr (types::is_trivially_relocatable<T>)
 		{
+			#ifdef __GNUC__
+			#pragma GCC diagnostic push
+			#pragma GCC diagnostic ignored "-Wclass-memaccess"
+			#endif
 			std::memmove(dest, source, sizeof(T) * n);
+			#ifdef __GNUC__
+			#pragma GCC diagnostic pop
+			#endif
 		}
 		else
 		{
@@ -154,6 +234,7 @@ namespace dib
 		return dest;
 	}
 
+	/// Relocate an object from a source to an initialized destination
 	template<class T>
 	T *relocate(T *source, T *dest)
 	{
@@ -163,6 +244,8 @@ namespace dib
 		return dest;
 	}
 
+	/// Relocate an array of objects from a source to an initialized destination,
+	/// where the source and destination do not overlap
 	template<class T>
 	T *nonoverlapping_relocate_n(T *source, size_t n, T *dest)
 	{
@@ -173,6 +256,7 @@ namespace dib
 		return dest;
 	}
 
+	/// Relocate an array of objects from a source to an initialized destination
 	template<class T>
 	T *relocate_n(T *source, size_t n, T *dest)
 	{
@@ -220,15 +304,19 @@ namespace dib
 
 namespace dib::types
 {
+	/// Get the true size of a type, which can be zero if it is void or empty
 	template<class T>
 	constexpr size_t packed_sizeof = []
-		{
-			if constexpr (std::is_void_v<T>) return 0;
-			else if constexpr (std::is_empty_v<T>) return 0;
-			else return sizeof(T);
-		}
-	();
+	{
+		if constexpr (std::is_void_v<T>) return 0;
+		else if constexpr (std::is_empty_v<T>) return 0;
+		else return sizeof(T);
+	}();
 
+	/// A description of a type's memory layout, as well as a set of methods
+	/// for manipulating that type in memory (i.e. constructors and destructors).
+	/// There should only ever be one instance of this type for any given type,
+	/// which is provided through dib::types::TypeDescriptor::of<> or dib::types::typedesc<>
 	class TypeDescriptor : public HashProvided
 	{
 		struct VTable
@@ -377,12 +465,13 @@ namespace dib::types
 		bool operator==(const TypeDescriptor &other) const = default;
 	};
 
+	/// Get the type descriptor for a provided type.
 	template<class T>
 	constexpr TypeDescriptor typedesc = TypeDescriptor::of<T>();
 }
 
-template<std::derived_from<dib::types::HashProvided> Hashable>
-	requires requires(const Hashable &hashable) { { hashable.get_hash() } -> std::same_as<size_t>; }
+/// Inject the implementation of std::hash for all subclasses of HashProvided
+template<dib::types::IsHashProvided Hashable>
 struct std::hash<Hashable>
 {
 	size_t operator()(const Hashable &hashable) const
@@ -391,8 +480,8 @@ struct std::hash<Hashable>
 	}
 };
 
-template<class Enum>
-	requires std::is_enum_v<Enum>
+/// General implementation of std::hash for enumeration types
+template<dib::types::IsEnum Enum>
 struct std::hash<Enum>
 {
 	size_t operator()(const Enum &e) const
@@ -401,16 +490,16 @@ struct std::hash<Enum>
 	}
 };
 
-#define DIB_NONGENERIC_INJECT template<>
-#define DIB_GENERIC_INJECT template
-#define DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(...) struct ::dib::types::IsTriviallyRelocatableType<__VA_ARGS__> : ::std::true_type {}
+/// Trivially relocatable standard library types
+#define DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(...) \
+	struct dib::types::IsTriviallyRelocatableType<__VA_ARGS__> : ::std::true_type {}
 
-DIB_NONGENERIC_INJECT DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::string);
-DIB_GENERIC_INJECT<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::vector<T>);
-DIB_GENERIC_INJECT<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::unordered_set<T>);
-DIB_GENERIC_INJECT<class K, class V> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::unordered_map<K, V>);
-DIB_GENERIC_INJECT<class T, size_t N> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::array<T, N>);
-DIB_GENERIC_INJECT<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::unique_ptr<T>);
-DIB_GENERIC_INJECT<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::shared_ptr<T>);
+	template<>        DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::string);
+	template<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::vector<T>);
+	template<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::unordered_set<T>);
+	template<class K, class V> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::unordered_map<K, V>);
+	template<dib::types::IsTriviallyRelocatable T, size_t N> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::array<T, N>);
+	template<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::unique_ptr<T>);
+	template<class T> DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(std::shared_ptr<T>);
 
-#endif
+#undef DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE

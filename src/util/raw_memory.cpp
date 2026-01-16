@@ -1,6 +1,9 @@
 #include "dib/raw_memory.h"
+#include "dib/raw_memory_utils.h"
+#include "dib/types.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <array>
 #include <numeric>
@@ -162,129 +165,35 @@ void str::ErasedVec::pop_back()
 // TODO: create and implement ErasedVec::erase //
 
 // ERASED STACK //
-size_t str::ErasedStack::read_size(size_t &size) const
+void str::ErasedStack::push(dib::types::TypeDescriptor type, void *contents)
 {
-    switch(buffer.back())
-    {
-        case size_marker::u8: // u8 //
-            size = dib::mem::read_as<uint8_t>(&buffer.back() - 1);
-            return 1;
-        
-        case size_marker::u16: // u16 //
-            size = dib::mem::read_as<uint16_t>(&buffer.back() - 2);
-            return 2;
-
-        case size_marker::u32: // u32 //
-            size = dib::mem::read_as<uint32_t>(&buffer.back() - 4);
-            return 4;
-            
-        default: // u64 //
-            size = dib::mem::read_as<uint64_t>(&buffer.back() - 8);
-            return 8;
-    }
-}
-
-void str::ErasedStack::push(size_t size, const uint8_t *contents)
-{
-    buffer.insert(buffer.end(), contents, contents + size);
-
-    if(size < std::numeric_limits<uint8_t>::max())
-    {
-        buffer.push_back((uint8_t)size);
-        buffer.push_back(size_marker::u8);
-    }
-    else if(size < std::numeric_limits<uint16_t>::max())
-    {
-        auto u16 = std::bit_cast<std::array<uint8_t, 2>>((uint16_t)size);
-        buffer.insert(buffer.end(), u16.begin(), u16.end());
-        buffer.push_back(size_marker::u16);
-    }
-    else if(size < std::numeric_limits<uint32_t>::max())
-    {
-        auto u32 = std::bit_cast<std::array<uint8_t, 4>>((uint32_t)size);
-        buffer.insert(buffer.end(), u32.begin(), u32.end());
-        buffer.push_back(size_marker::u32);
-    }
-    else
-    {
-        auto u64 = std::bit_cast<std::array<uint8_t, 8>>((uint64_t)size);
-        buffer.insert(buffer.end(), u64.begin(), u64.end());
-        buffer.push_back(size_marker::u64);
-    }
+    buffer.insert(buffer.end(), (uint8_t *)contents, (uint8_t *)contents + type.packed_size());
+    buffer.insert(buffer.end(), (uint8_t *)&type, (uint8_t *)&type + sizeof(type));
 }
 
 ErasedStack::Value str::ErasedStack::top()
 {
-    size_t size;
-    auto off = read_size(size);
-    auto ptr = &buffer.back() - off - size;
+    if(buffer.empty())
+        RUNTIME_ERROR("Attempt to get the top of an empty ErasedStack");
+
+    auto type = *(dib::types::TypeDescriptor *)(&buffer.back() - sizeof(dib::types::TypeDescriptor) + 1);
 
     return Value
     {
-        .size = size,
-        .pointer = ptr
+        .type = type,
+        .pointer = &buffer.back() - sizeof(dib::types::TypeDescriptor) - type.packed_size() + 1
     };
 }
 
-ErasedStack::Value str::ErasedStack::pop()
+void str::ErasedStack::pop_nondestructive()
 {
     auto value = top();
-
-    size_t size;
-    auto off = read_size(size);
-
-    buffer.erase(buffer.end() - 1 - off - size, buffer.end());
-    
-    return value;
+    buffer.erase(buffer.begin() + ((uint8_t *) value.pointer - &buffer.front()), buffer.end());
 }
 
-// Inhomogenious stack //
-void str::InhomogeneousStack::push(types::TypeDescriptor desc, void *value)
+void str::ErasedStack::pop()
 {
-    auto start_idx = buffer.size();
-    buffer.resize(buffer.size() + desc.packed_size() + sizeof desc);
-
-    auto dest = buffer.data() + start_idx;
-    desc.uninitialized_relocate(value, dest);
-
-    auto desc_dest = buffer.data() + start_idx + desc.packed_size();
-    mem::read_as<types::TypeDescriptor>(desc_dest) = desc;
-
-    count++;
-}
-
-void *str::InhomogeneousStack::top()
-{
-    auto end = buffer.data() + buffer.size();
-    return end - top_type().packed_size() - sizeof(types::TypeDescriptor);
-}
-
-const void *str::InhomogeneousStack::top() const
-{
-    auto end = buffer.data() + buffer.size();
-    return end - top_type().packed_size() - sizeof(types::TypeDescriptor);
-}
-
-auto str::InhomogeneousStack::top_type() const -> types::TypeDescriptor
-{
-    auto end = buffer.data() + buffer.size();
-    return mem::read_as<types::TypeDescriptor>(end - sizeof(types::TypeDescriptor));
-}
-
-void str::InhomogeneousStack::pop_relocated()
-{
-    buffer.resize(buffer.size() - top_type().packed_size() - sizeof(types::TypeDescriptor));
-    count--;
-}
-
-void str::InhomogeneousStack::pop()
-{
-    top_type().destruct(top());
-    pop_relocated();
-}
-
-void str::InhomogeneousStack::uninitialized_relocate_top(void *dest)
-{
-    top_type().uninitialized_relocate(top(), dest);
-    pop_relocated();
+    auto value = top();
+    value.type.destruct(value.pointer);
+    buffer.erase(buffer.begin() + ((uint8_t *) value.pointer - &buffer.front()), buffer.end());
 }

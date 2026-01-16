@@ -1,4 +1,5 @@
 #include "dib/files.h"
+#include "dib/preprocess.h"
 
 #include <iostream>
 #include <fstream>
@@ -11,5 +12,5 @@ std::string dib::files::read_all_text(const path &file)
 
 	strstream << stream.rdbuf();
 
-	return std::move(strstream).str();
+	return MOVE(strstream).str();
 }
