@@ -3,7 +3,6 @@
 
 #include "dib/project.h"
 #include "dib/json.h"
-#include "dib/env.h"
 #include "dib/resources.h"
 
 #include <algorithm>
@@ -335,7 +334,7 @@ void Project::build(const BuildSettings &settings, const fs::path &output) const
     // Build resources batch if requested //
     if(settings.use_batch)
     {
-        resources::ResourceBatch::make_from_directory(resources_folder(), build_folder() / ".dibbatch");
+        res::ResourceBatch::make_from_directory(resources_folder(), build_folder() / ".dibbatch");
     }
 }
 

@@ -148,7 +148,7 @@ namespace dib::option
 			if(!self.has_value()) 
 				RUNTIME_ERROR("Unwrapping a 'none'"); 
 
-			return static_cast<types::CopyConstRef<Self, T>>(*std::addressof(self._value)); 
+			return static_cast<types::CopyConstRef<Self &&, T>>(*std::addressof(self._value)); 
 		}
 
 		constexpr T unwrap_or(T &&value) &&

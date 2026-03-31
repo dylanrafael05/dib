@@ -1,12 +1,11 @@
 #include "dib/raw_memory.h"
 #include "dib/raw_memory_utils.h"
 #include "dib/types.h"
+#include "dib/debug.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <array>
-#include <numeric>
 
 using namespace dib::structures;
 namespace str = dib::structures;
@@ -165,7 +164,7 @@ void str::ErasedVec::pop_back()
 // TODO: create and implement ErasedVec::erase //
 
 // ERASED STACK //
-void str::ErasedStack::push(dib::types::TypeDescriptor type, void *contents)
+void str::ErasedStack::push(refl::Type type, void *contents)
 {
     buffer.insert(buffer.end(), (uint8_t *)contents, (uint8_t *)contents + type.packed_size());
     buffer.insert(buffer.end(), (uint8_t *)&type, (uint8_t *)&type + sizeof(type));
@@ -176,12 +175,12 @@ ErasedStack::Value str::ErasedStack::top()
     if(buffer.empty())
         RUNTIME_ERROR("Attempt to get the top of an empty ErasedStack");
 
-    auto type = *(dib::types::TypeDescriptor *)(&buffer.back() - sizeof(dib::types::TypeDescriptor) + 1);
+    auto type = *(refl::Type *)(&buffer.back() - sizeof(refl::Type) + 1);
 
     return Value
     {
         .type = type,
-        .pointer = &buffer.back() - sizeof(dib::types::TypeDescriptor) - type.packed_size() + 1
+        .pointer = &buffer.back() - sizeof(refl::Type) - type.packed_size() + 1
     };
 }
 

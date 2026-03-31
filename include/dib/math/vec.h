@@ -3,11 +3,14 @@
 #include <stddef.h>
 #include <array>
 #include <cmath>
+#include <format>
+#include <utility>
 
 #include "raylib.h"
 
 #include "dib/math/concept.h"
 #include "dib/math/externs.h"
+#include "dib/debug.h"
 #include "dib/types.h"
 
 namespace dib::math
@@ -35,6 +38,9 @@ namespace dib::math
             constexpr vec_base(T e)
                 : x(e), y(e)
             {}
+            constexpr vec_base(Vector2 v3) requires std::same_as<T, float>
+                : vec_base<T, 2>(v3.x, v3.y)
+            {}
             
             constexpr vec_base()
             {}
@@ -42,6 +48,21 @@ namespace dib::math
             operator Vector2() const requires std::same_as<T, float>
             {
                 return *reinterpret_cast<const Vector2*>(this);
+            }
+
+            constexpr T &get_unchecked(size_t i)
+            {
+                if(i == 0) return x;
+                if(i == 1) return y;
+
+                std::unreachable();
+            }
+            constexpr const T &get_unchecked(size_t i) const
+            {
+                if(i == 0) return x;
+                if(i == 1) return y;
+
+                std::unreachable();
             }
         };
         
@@ -59,13 +80,27 @@ namespace dib::math
             constexpr vec_base(T e)
                 : vec_base<T, 2>(e), z(e)
             {}
+            constexpr vec_base(Vector3 v3) requires std::same_as<T, float>
+                : vec_base<T, 3>(v3.x, v3.y, v3.z)
+            {}
             
             constexpr vec_base()
             {}
-            
+
             operator Vector3() const requires std::same_as<T, float>
             {
                 return *reinterpret_cast<const Vector3*>(this);
+            }
+            
+            constexpr T &get_unchecked(size_t i)
+            {
+                if(i == 2) return z;
+                return vec_base<T, 2>::get_unchecked(i);
+            }
+            constexpr const T &get_unchecked(size_t i) const
+            {
+                if(i == 2) return z;
+                return vec_base<T, 2>::get_unchecked(i);
             }
         };
         
@@ -91,6 +126,17 @@ namespace dib::math
             {
                 return *reinterpret_cast<const Vector4*>(this);
             }
+              
+            constexpr T &get_unchecked(size_t i)
+            {
+                if(i == 3) return w;
+                return vec_base<T, 3>::get_unchecked(i);
+            }
+            constexpr const T &get_unchecked(size_t i) const
+            {
+                if(i == 3) return w;
+                return vec_base<T, 3>::get_unchecked(i);
+            }
         };
         
         template<class T, size_t N>
@@ -110,6 +156,17 @@ namespace dib::math
             
             constexpr vec_base()
             {}
+            
+            constexpr T &get_unchecked(size_t i)
+            {
+                if(i > 3) return rest[i - 4];
+                return vec_base<T, 4>::get_unchecked(i);
+            }
+            constexpr const T &get_unchecked(size_t i) const
+            {
+                if(i > 3) return rest[i - 4];
+                return vec_base<T, 4>::get_unchecked(i);
+            }
         };
         
         template<class T, size_t N, size_t Real>
@@ -137,15 +194,33 @@ namespace dib::math
     }
 
     template<class T, size_t N>
-    class vec : public detail::vec_base<T, N>, public detail::vec_consts<T, N, N>, types::TriviallyRelocatable
+    class vec final : public detail::vec_base<T, N>, public detail::vec_consts<T, N, N>, public types::TriviallyRelocatable
     {
     public:
         // ARRAY ACCESSORS //
-        std::array<T, N> &as_array() {return *reinterpret_cast<std::array<T, N>*>(this);}
-        const std::array<T, N> &as_array() const {return *reinterpret_cast<const std::array<T, N>*>(this);}
+        decltype(auto) as_array() 
+        {
+            return *reinterpret_cast<std::array<T, N>*>((detail::vec_base<T, N> *)this);
+        }
+        decltype(auto) as_array() const
+        {
+            return *reinterpret_cast<std::array<T, N>*>((detail::vec_base<T, N> *)this);
+        }
 
-        T &operator[](size_t x) {return as_array()[x];}
-        const T &operator[](size_t x) const {return as_array()[x];}
+        constexpr decltype(auto) operator[](size_t x) 
+        { 
+            if(x >= N) 
+                RUNTIME_ERROR("Index {} out of bounds for vec of dimension {}", x, N); 
+
+            return detail::vec_base<T, N>::get_unchecked(x);
+        }
+        constexpr decltype(auto) operator[](size_t x) const
+        { 
+            if(x >= N) 
+                RUNTIME_ERROR("Index {} out of bounds for vec of dimension {}", x, N); 
+            
+            return detail::vec_base<T, N>::get_unchecked(x);
+        }
 
         // CONSTRUCTORS //
         template<class X>
@@ -160,12 +235,12 @@ namespace dib::math
         using detail::vec_base<T, N>::vec_base;
 
         // TUPLE PROTOCOL //
-        template<size_t I> T &get()
+        template<size_t I> constexpr decltype(auto) get()
         {
             return (*this)[I];
         }
         
-        template<size_t I> const T &get() const
+        template<size_t I> constexpr decltype(auto) get() const
         {
             return (*this)[I];
         }
@@ -286,7 +361,7 @@ namespace dib::math
 
     // Comparison //
     template<class T, size_t N>
-    bool operator==(vec<T, N> lhs, vec<T, N> rhs)
+    constexpr bool operator==(vec<T, N> lhs, vec<T, N> rhs)
     {
         for(size_t i = 0; i < N; i++)
             if(lhs[i] != rhs[i]) return false;
@@ -295,7 +370,7 @@ namespace dib::math
     }
 
     template<class T, size_t N>
-    bool operator!=(vec<T, N> lhs, vec<T, N> rhs)
+    constexpr bool operator!=(vec<T, N> lhs, vec<T, N> rhs)
     {
         for(size_t i = 0; i < N; i++)
             if(lhs[i] != rhs[i]) return true;
@@ -303,16 +378,9 @@ namespace dib::math
         return false;
     }
 
-    #define __func(T, N, ...) \
-        extern template bool operator==(vec<T, N>, vec<T, N>); \
-        extern template bool operator!=(vec<T, N>, vec<T, N>);
-    
-    __DIBMATH_ALL_EXTERNS()
-    #undef __func
-
     // Vector operations //
     template<concepts::IsArithmetic T, size_t N>
-    T dot(vec<T, N> lhs, vec<T, N> rhs)
+    constexpr T dot(vec<T, N> lhs, vec<T, N> rhs)
     {
         T out = 0;
 
@@ -322,8 +390,18 @@ namespace dib::math
         return out;
     }
 
+    template<concepts::IsArithmetic T>
+    constexpr vec<T, 3> cross(vec<T, 3> lhs, vec<T, 3> rhs)
+    {
+        return {
+            lhs[2-1]*rhs[3-1] - lhs[3-1]*rhs[2-1],
+            lhs[3-1]*rhs[1-1] - lhs[1-1]*rhs[3-1],
+            lhs[1-1]*rhs[2-1] - lhs[2-1]*rhs[1-1]
+        };
+    }
+
     template<concepts::IsArithmetic T, size_t N>
-    float length_sq(vec<T, N> value)
+    constexpr float length_sq(vec<T, N> value)
     {
         float sum = 0;
 
@@ -334,22 +412,20 @@ namespace dib::math
     }
     
     template<concepts::IsArithmetic T, size_t N>
-    float length(vec<T, N> value)
+    constexpr float length(vec<T, N> value)
     {
         return sqrtf(length_sq(value));
     }
-
-    #define __func(T, N, ...) \
-        extern template T dot(vec<T, N>, vec<T, N>); \
-        extern template float length_sq(vec<T, N>); \
-        extern template float length(vec<T, N>);
     
-    __DIBMATH_SCALAR_EXTERNS()
-    #undef __func
+    template<concepts::IsArithmetic T, size_t N>
+    constexpr float distance(vec<T, N> a, vec<T, N> b)
+    {
+        return length(a - b);
+    }
 
     // Normalization //
     template<concepts::IsReal T, size_t N>
-    void normalize_inplace(vec<T, N> &value)
+    constexpr void normalize_inplace(vec<T, N> &value)
     {
         float length = dib::math::length(value);
 
@@ -358,23 +434,16 @@ namespace dib::math
     }
 
     template<concepts::IsReal T, size_t N>
-    vec<T, N> normalize(vec<T, N> value)
+    constexpr vec<T, N> normalize(vec<T, N> value)
     {
         vec<T, N> copy = value;
         normalize_inplace(copy);
         return copy;
     }
-    
-    #define __func(T, N, ...) \
-        extern template vec<T, N> normalize(vec<T, N>); \
-        extern template void normalize_inplace(vec<T, N>&);
-
-    __DIBMATH_REAL_EXTERNS()
-    #undef __func
 
     // Max, min, and clamp //
     template<concepts::IsArithmetic T, size_t N>
-    vec<T, N> max(vec<T, N> lhs, vec<T, N> rhs)
+    constexpr vec<T, N> max(vec<T, N> lhs, vec<T, N> rhs)
     {
         vec<T, N> out;
 
@@ -385,7 +454,7 @@ namespace dib::math
     }
     
     template<concepts::IsArithmetic T, size_t N>
-    vec<T, N> min(vec<T, N> lhs, vec<T, N> rhs)
+    constexpr vec<T, N> min(vec<T, N> lhs, vec<T, N> rhs)
     {
         vec<T, N> out;
 
@@ -396,7 +465,7 @@ namespace dib::math
     }
     
     template<concepts::IsArithmetic T, size_t N>
-    vec<T, N> clamp(vec<T, N> val, vec<T, N> min, vec<T, N> max)
+    constexpr vec<T, N> clamp(vec<T, N> val, vec<T, N> min, vec<T, N> max)
     {
         vec<T, N> out;
 
@@ -405,18 +474,10 @@ namespace dib::math
 
         return out;
     }
-    
-    #define __func(T, N, ...) \
-        extern template vec<T, N> max(vec<T, N>, vec<T, N>); \
-        extern template vec<T, N> min(vec<T, N>, vec<T, N>); \
-        extern template vec<T, N> clamp(vec<T, N>, vec<T, N>, vec<T, N>);
-
-    __DIBMATH_SCALAR_EXTERNS()
-    #undef __func
 
     // Lerp //
     template<concepts::IsReal T, size_t N>
-    vec<T, N> lerp(vec<T, N> start, vec<T, N> end, float t)
+    constexpr vec<T, N> lerp(vec<T, N> start, vec<T, N> end, float t)
     {
         if(t == 0) return start;
         if(t == 1) return end;
@@ -430,7 +491,7 @@ namespace dib::math
     }
 
     template<concepts::IsReal T, size_t N>
-    vec<T, N> clerp(vec<T, N> start, vec<T, N> end, vec<float, N> t)
+    constexpr vec<T, N> clerp(vec<T, N> start, vec<T, N> end, vec<float, N> t)
     {
         vec<T, N> out;
 
@@ -439,10 +500,6 @@ namespace dib::math
 
         return out;
     }
-
-    #define __func(T, N, ...) extern template vec<T, N> lerp(vec<T, N>, vec<T, N>, float);
-        __DIBMATH_REAL_EXTERNS()
-    #undef __func
 
     // Component-wise math //
     template<class T, size_t N, class Lambda>

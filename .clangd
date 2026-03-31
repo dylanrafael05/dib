@@ -1,2 +1,2 @@
 CompileFlags:
-  Add: [-xc++, -std=c++23, -Iinclude, -Isrc, -IC:/raylib/raylib/src]
+  Add: [-xc++, -std=c++26, -stdlib=libc++, -fconstexpr-backtrace-limit=0, -ftemplate-backtrace-limit=0, -IC:/Users/rafaed/clang-p2996/install/include/c++/v1, -Iinclude, -Isrc, -IC:/raylib/raylib/src, -freflection-latest, -fexperimental-library]

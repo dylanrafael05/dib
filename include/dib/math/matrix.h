@@ -1,157 +1,175 @@
-#ifndef __DIBMATH_MATRIX_H
-#define __DIBMATH_MATRIX_H
+#pragma once
 
 #include "externs.h"
+#include "raylib.h"
+#include "raymath.h"
 #include "vec.h"
-#include <bit>
 
-#ifndef __DIBMATH_MATRIX_IMPL
-static_assert(false, "math/matrix.h is unfinished.");
-#endif
+#include "dib/preprocess.h"
 
 namespace dib::math
 {
-    template<class T, size_t R, size_t C>
+    constexpr struct RowMajorType {} row_major;
+
+    template<class T, size_t C, size_t R>
     class matrix;
 
     namespace detail
     {
-        template<class T, size_t R, size_t C>
-        class matrix_base;
-        
-        template<class T, size_t C>
-        class matrix_base<T, 2, C>
+        template<class T, size_t C, size_t R>
+        class matrix_base
         {
-        public:
-            vec<T, C> x;
-            vec<T, C> y;
+        protected:
+            std::array<T, C*R> _array;
 
-            constexpr matrix_base() {}
-            constexpr matrix_base(vec<T, C> x, vec<T, C> y)
-                : x(x), y(y)
-            {}
-        };
-        
-        template<class T, size_t C>
-        class matrix_base<T, 3, C> : public matrix_base<T, 2, C>
-        {
         public:
-            vec<T, C> z;
+            constexpr explicit matrix_base(T value = (T)0)
+            {
+                _array.fill(value);
+            }
 
-            constexpr matrix_base() {}
-            constexpr matrix_base(vec<T, C> x, vec<T, C> y, vec<T, C> z)
-                : matrix_base<T, 2, C>(x, y), z(z)
-            {}
-        };
-        
-        template<class T, size_t C>
-        class matrix_base<T, 4, C> : public matrix_base<T, 3, C>
-        {
-        public:
-            vec<T, C> w;
-
-            constexpr matrix_base() {}
-            constexpr matrix_base(vec<T, C> x, vec<T, C> y, vec<T, C> z, vec<T, C> w)
-                : matrix_base<T, 3, C>(x, y, z), w(w)
+            constexpr explicit matrix_base(std::array<T, C*R> &&array)
+                : _array(MOVE(array))
             {}
             
-            operator Matrix() const requires std::same_as<T, float>
+            constexpr explicit matrix_base(RowMajorType, std::array<T, C*R> &&array)
+            {
+                for(size_t i = 0; i < R; i++)
+                    for(size_t j = 0; j < C; j++)
+                        (*this)[i, j] = array[i * C + j];
+            }
+
+            constexpr matrix_base(vec<T, R> vec) requires (C == 1)
+            {
+                for(size_t i = 0; i < R; i++)
+                    _array[i] = vec[i];
+            }
+            
+            template<class X>
+            constexpr explicit operator matrix<X, R, C>() const 
+            {
+                matrix<X, R, C> o;
+
+                for(size_t i = 0; i < R; i++)
+                    for(size_t j = 0; j < C; j++)
+                        o[i,j] = static_cast<X>((*this)[i,j]);
+                
+                return o;
+            }
+
+            constexpr operator vec<T, R>() const requires (C == 1)
+            {
+                vec<T, R> o;
+
+                for(size_t i = 0; i < R; i++)
+                    o[i] = _array[i];
+
+                return o;
+            }
+            
+            constexpr operator vec<T, C>() const requires (R == 1)
+            {
+                vec<T, C> o;
+                
+                for(size_t i = 0; i < C; i++)
+                    o[i] = _array[i];
+
+                return o;
+            }
+            
+            constexpr std::array<T, R*C> &as_array() {return _array;}
+            constexpr const std::array<T, R*C> &as_array() const {return _array;}
+
+            constexpr T &operator[](size_t r, size_t c) 
+            {
+                if(r >= R || c >= C)
+                    RUNTIME_ERROR("Index ({}, {}) out of bounds for matrix of dimension {}x{}", r, c, C, R);
+
+                return _array[r + (c * R)];
+            }
+
+            constexpr const T &operator[](size_t r, size_t c) const
+            {
+                return const_cast<matrix_base<T, C, R>*>(this)->operator[](r, c);
+            }
+
+            constexpr vec<T, C> get_row(size_t r) const
+            {
+                vec<T, C> value;
+
+                for(size_t i = 0; i < C; i++)
+                    value[i] = (*this)[r, i];
+
+                return value;
+            }
+            
+            constexpr vec<T, R> get_col(size_t c) const
+            {
+                vec<T, R> value;
+
+                for(size_t i = 0; i < R; i++)
+                    value[i] = (*this)[i, c];
+
+                return value;
+            }
+            
+            const static matrix<T, C, R> identity;
+
+            matrix_base(const Matrix &value) 
+                requires (R == C && C == 4 && std::is_same_v<T, float>)
+            {
+                auto varr = MatrixToFloatV(value);
+                for(size_t i = 0; i < 16; i++)
+                    _array[i] = varr.v[i];
+            }
+
+            operator Matrix() const 
+                requires (R == C && C == 4 && std::is_same_v<T, float>)
             {
                 Matrix o;
 
-                o.m0 = (*this)[0][0];
-                o.m1 = (*this)[0][1];
-                o.m2 = (*this)[0][2];
-                o.m3 = (*this)[0][3];
+                o.m0 = (*this)[0, 0];
+                o.m1 = (*this)[0, 1];
+                o.m2 = (*this)[0, 2];
+                o.m3 = (*this)[0, 3];
 
-                o.m4 = (*this)[1][0];
-                o.m5 = (*this)[1][1];
-                o.m6 = (*this)[1][2];
-                o.m7 = (*this)[1][3];
+                o.m4 = (*this)[1, 0];
+                o.m5 = (*this)[1, 1];
+                o.m6 = (*this)[1, 2];
+                o.m7 = (*this)[1, 3];
                 
-                o.m8 = (*this)[2][0];
-                o.m9 = (*this)[2][1];
-                o.m10 = (*this)[2][2];
-                o.m11 = (*this)[2][3];
+                o.m8 = (*this)[2, 0];
+                o.m9 = (*this)[2, 1];
+                o.m10 = (*this)[2, 2];
+                o.m11 = (*this)[2, 3];
                 
-                o.m12 = (*this)[3][0];
-                o.m13 = (*this)[3][1];
-                o.m14 = (*this)[3][2];
-                o.m15 = (*this)[3][3];
+                o.m12 = (*this)[3, 0];
+                o.m13 = (*this)[3, 1];
+                o.m14 = (*this)[3, 2];
+                o.m15 = (*this)[3, 3];
 
                 return o;
             }
         };
-        
-        template<class T, size_t R, size_t C>
-        class matrix_base : public matrix_base<T, 4, C>
-        {
-        public:
-            std::array<vec<T, C>, R-4> rest;
-
-            constexpr matrix_base() {}
-            constexpr matrix_base(vec<T, C> x, vec<T, C> y, vec<T, C> z, vec<T, C> w, std::array<vec<T, C>, R-4> rest)
-                : matrix_base<T, 4, C>(x, y, z, w), rest(rest)
-            {}
-        };
-
-        template<class T, size_t R, size_t C>
-        struct matrix_consts {};
-
-        template<class T, size_t N>
-        struct matrix_consts<T, N, N> 
-        {
-            static const matrix<T, N, N> identity;
-        };
     }
 
-    template<class T, size_t R, size_t C>
-    class matrix : public detail::matrix_base<T, R, C>, public detail::matrix_consts<T, R, C>
+    template<class T, size_t C, size_t R>
+    class matrix : public detail::matrix_base<T, C, R>
     {
-        // ARRAY ACCESSORS //
-        std::array<T, R*C> &as_array() {return *reinterpret_cast<std::array<T, R*C>*>(this);}
-        const std::array<T, R*C> &as_array() const {return *reinterpret_cast<const std::array<T, R*C>*>(this);}
-        
-        std::array<vec<T, C>, R> &as_row_array() {return *reinterpret_cast<std::array<vec<T, C>, R>*>(this);}
-        const std::array<vec<T, C>, R> &as_row_array() const {return *reinterpret_cast<const std::array<vec<T, C>, R>*>(this);}
-
-        vec<T, C> &operator[](size_t x) {return as_row_array()[x];}
-        const vec<T, C> &operator[](size_t x) const {return as_row_array()[x];}
-        
-        // CONSTRUCTORS //
-        template<class X>
-        constexpr explicit operator matrix<X, R, C>() const 
-        {
-            matrix<X, R, C> out;
-            for(size_t i = 0; i < R; i++)
-                for(size_t j = 0; j < C; j++)
-                    out[i][j] = static_cast<X>((*this)[i][j]);
-            return out;
-        }
-
-        using detail::matrix_base<T, R, C>::matrix_base;
+        using detail::matrix_base<T, C, R>::matrix_base;
     };
 
-    template<class T, size_t N> constexpr matrix<T, N, N> detail::matrix_consts<T, N, N>::identity = []
+    template<class T, size_t N>
+    matrix(vec<T, N>) -> matrix<T, 1, N>;
+
+    template<class T, size_t C, size_t R> const matrix<T, C, R> detail::matrix_base<T, C, R>::identity = []
         {
-            std::array<T, N*N> out{(T)0};
+            matrix<T, C, R> o;
 
-            for(size_t i = 0; i < N; i++)
-                out[i + i*N] = (T)1;
-            
-            return std::bit_cast<matrix<T, N, N>>(out);
-        }
-    ();
+            for(size_t i = 0; i < C && i < R; i++)
+                o[i, i] = (T)1;
 
-    // TODO: why does this return a non-identity matrix?
-    template<class T, size_t N> constexpr auto mat_identity = []
-        {
-            std::array<T, N*N> out{(T)0};
-
-            for(size_t i = 0; i < N; i++)
-                out[i + i*N] = (T)1;
-            
-            return std::bit_cast<matrix<T, N, N>>(out);
+            return o;
         }
     ();
 
@@ -163,9 +181,33 @@ namespace dib::math
     __DIBMATH_ALL_EXTERNS(4)
     #undef __func
 
+    template<class T, size_t R1, size_t H, size_t C2>
+    constexpr matrix<T, C2, R1> operator*(const matrix<T, H, R1> &l, const matrix<T, C2, H> &r)
+    {
+        matrix<T, C2, R1> o;
 
+        for(size_t i = 0; i < R1; i++)
+            for(size_t j = 0; j < C2; j++)
+                o[i, j] = dot(l.get_row(i), r.get_col(j));
+
+        return o;
+    }
+
+    template<class T, size_t C, size_t R>
+    constexpr vec<T, C> operator*(const matrix<T, C, R> &l, vec<T, C> r)
+    {
+        return l * matrix(r);
+    }
+
+    template<class T, size_t C, size_t R>
+    constexpr matrix<T, R, C> transpose(const matrix<T, C, R> &m)
+    {
+        matrix<T, R, C> o;
+
+        for(size_t i = 0; i < R; i++)
+            for(size_t j = 0; j < C; j++)
+                o[j, i] = m[i, j];
+
+        return o;
+    }
 }
-
-constexpr auto M = dib::math::mat_identity<float, 4>;
-
-#endif

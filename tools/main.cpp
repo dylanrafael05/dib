@@ -100,7 +100,7 @@ void make_batch()
     fs::path folder(env::argv()[2]);
     fs::path target(env::argv()[3]);
 
-    dib::resources::ResourceBatch::make_from_directory(folder, target);
+    dib::res::ResourceBatch::make_from_directory(folder, target);
 }
 
 int main(int argc, char **argv)

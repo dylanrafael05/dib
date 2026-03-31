@@ -15,7 +15,7 @@
 #include "raygui.h"
 
 using namespace dib::app2;
-using namespace dib::resources;
+using namespace dib::res;
 using namespace dib::ecs;
 using namespace dib;
 

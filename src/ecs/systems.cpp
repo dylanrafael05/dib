@@ -1,5 +1,6 @@
 #include "dib/ecs/systems.h"
 #include "dib/debug.h"
+#include "dib/ecs/systems_fwd.h"
 #include "dib/ecs/world.h"
 
 #include <numeric>
@@ -7,21 +8,37 @@
 
 using namespace dib::ecs;
 
+SystemGroup SystemGroup::create()
+{
+	static uint32_t id_counter = 1;
+
+	SystemGroup grp;
+	grp.id = id_counter++;
+	return grp;
+}
+
 // Systems //
 void System::execute(const Systems &scheduler, World &world) const
 {
-	if (pred && !pred()) [[unlikely]]
-		return;
+	try
+	{
+		if (pred && !pred()) [[unlikely]]
+			return;
 
-	init();
-	std::visit(
-		functional::Overload{
-			[&](const SystemFn &fn) { fn(); },
-			[&](const SystemGroup &group) { scheduler.execute(world, group); }
-		},
-		action
-	);
-	deinit();
+		init();
+		std::visit(
+			functional::Overload{
+				[&](const SystemFn &fn) { fn(); },
+				[&](const SystemGroup &group) { scheduler.execute(world, group); }
+			},
+			action
+		);
+		deinit();
+	}
+	catch(debug::RuntimeError &error)
+	{
+		error.write_to_stream(std::cerr);
+	}
 }
 
 // SystemScheduler //
@@ -52,7 +69,7 @@ void Systems::add(const std::initializer_list<System> &systems)
 	for (auto &s_ref : systems)
 	{
 		auto s = dib::copy(s_ref);
-		add(std::move(s));
+		add(MOVE(s));
 	}
 }
 
@@ -126,8 +143,12 @@ void Systems::execute(World &world, SystemGroup group_id) const
 	}
 
 	if (!_groups.contains(group_id))
+	{
 		return;
+	}
 
-	for (auto &stm : _groups.at(group_id)._system_list)
+	auto &group = _groups.at(group_id);
+
+	for (auto &stm : group._system_list)
 		stm->execute(*this, world);
 }

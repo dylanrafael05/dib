@@ -1,19 +1,96 @@
 #include "dib/ecs/world.h"
 #include "dib/debug.h"
+#include "dib/ecs/entities.h"
+#include "dib/bijection.h"
+#include "dib/iou.h"
+#include "dib/debug.h"
 
 #include <unordered_map>
-#include <iostream>
 
 using namespace dib::ecs;
-namespace types = dib::types;
+namespace refl = dib::refl;
 
-bool EntityID::is_invalid() const
+// Component type mapping functions //
+static dib::IOU<dib::structures::Bijection<refl::Type, ComponentID>> component_id_map;
+static ComponentID::ValueType &next_free_component_id()
+{
+    static ComponentID::ValueType value;
+    return value;
+}
+
+ComponentID detail::component_id(refl::Type desc)
+{
+    auto it = component_id_map.value().find(desc);
+    if (it != component_id_map.value().end()) return it->second;
+
+    auto new_id = next_free_component_id()++;
+    component_id_map.value().insert(desc, { new_id });
+    
+    LOGF("Component {} being assigned id of {}", desc.name(), new_id);
+
+    return { new_id };
+}
+
+refl::Type ComponentID::type() const
+{
+    if(auto type = component_id_map.value().find(*this); type != component_id_map.value().end())
+    {
+        return type->first;
+    }
+    
+    RUNTIME_ERROR("No component type descriptor associated with id {}", value());
+}
+
+bool Entity::is_invalid() const
 {
     return index == INVALID_ID;
 }
 
-// Archetypes //
-ArchetypeStorage::~ArchetypeStorage()
+// Archetype //
+Archetype::Archetype(dib::structures::SparseBitset &&bits)
+    : _bits(MOVE(bits))
+{}
+
+Archetype Archetype::from_bits(dib::structures::SparseBitset &&bits)
+{
+    return { MOVE(bits) };
+}
+
+const dib::structures::SparseBitset &Archetype::bits() const 
+{ 
+    return _bits; 
+}
+
+bool Archetype::has_component(ComponentID id) const 
+{ 
+    return _bits.test(id.value()); 
+}
+
+bool Archetype::has_component(refl::Type id) const 
+{ 
+    return has_component(detail::component_id(id)); 
+}
+
+bool Archetype::is_subset_of(const Archetype &other) const 
+{ 
+    return _bits.is_subset_of(other._bits); 
+}
+
+// ArchetypeStorage //
+detail::ArchetypeStorage::ArchetypeStorage()
+    : index(0), capacity(0)
+{}
+
+detail::ArchetypeStorage::ArchetypeStorage(ArchetypeStorage &&other)
+    : archetype(MOVE(other.archetype)), index(other.index), 
+    component_stores(MOVE(other.component_stores)), entity_ids(MOVE(other.entity_ids)),
+    free_indices(MOVE(other.free_indices)), capacity(other.capacity),
+    related_archetypes(MOVE(other.related_archetypes))
+{
+    other.capacity = 0;
+}
+
+detail::ArchetypeStorage::~ArchetypeStorage()
 {
     for(size_t i = 0; i < capacity; i++)
     {
@@ -36,13 +113,24 @@ ArchetypeStorage::~ArchetypeStorage()
     }
 }
 
+void detail::ArchetypeStorage::create_storage_for(ComponentID cid)
+{
+    auto type = cid.type();
+
+    if(type.packed_size() != 0)
+    {
+        component_stores[cid] = 
+            dib::structures::ErasedVec{ type.packed_size(), type };
+    }
+}
+
 // World //
 Entities::Entities()
 {
     register_archetype({});
 }
 
-size_t Entities::register_archetype(ArchetypeStorage &&in)
+size_t Entities::register_archetype(detail::ArchetypeStorage &&in)
 {
     auto index = archetype_stores.size();
     archetype_stores.push_back(std::move(in));
@@ -77,77 +165,92 @@ void Entities::register_query(const Archetype &in)
         }
     }
 
-    query_map[in] = std::move(matching);
+    query_map[in] = MOVE(matching);
 }
 
-ArchetypeStorage &Entities::add_or_remove_from_archetype(types::TypeDescriptor cid, ArchetypeID archetype_id, bool add) 
+detail::ArchetypeStorage &Entities::add_or_remove_from_archetype(
+    ComponentID cid, detail::ArchetypeID archetype_id, bool add) 
 {
-    auto related_get = [&](const ArchetypeEdge &edge)
+    // Helper lambdas to get and set the related archetype edges based on the 'add' variable
+    auto related_get = [&](const detail::ArchetypeEdge &edge)
     {
         if(add) return edge.on_add;
         else return edge.on_remove;
     };
     
-    auto related_set = [&](ArchetypeEdge &edge, ArchetypeID id)
+    auto related_set = [&](detail::ArchetypeEdge &edge, detail::ArchetypeID id)
     {
         if(add) edge.on_add = id;
         else edge.on_remove = id;
     };
     
-    auto inverse_related_set = [&](ArchetypeEdge &edge, ArchetypeID id)
+    auto inverse_related_set = [&](detail::ArchetypeEdge &edge, detail::ArchetypeID id)
     {
         if(!add) edge.on_add = id;
         else edge.on_remove = id;
     };
 
+    // Get the archetype being operated on.
     auto &archetype = archetype_stores[archetype_id];       
     auto &related = archetype.related_archetypes;
     
     auto related_it = related.find(cid);
 
-    if(related_it != related.end() && related_get(related_it->second) != (ArchetypeID)(-1))
+    // If exists in cache, return from cache.
+    if(related_it != related.end() && related_get(related_it->second) != (detail::ArchetypeID)(-1))
     {
         return archetype_stores[related_get(related_it->second)];
     }
 
+    // If our edge cache is truly blank (neither add or remove exist),
+    // add to it, since this operation must create a new cache entry.
     if(related_it == related.end())
     {
-        related_it = related.insert({cid, ArchetypeEdge{}}).first;
+        related_it = related.insert({cid, detail::ArchetypeEdge{}}).first;
     }
 
-    auto dcid = detail::dense_component_type(cid);
-
-    if(add && archetype.archetype.test(dcid))
+    if(add && archetype.archetype.has_component(cid))
     {
-        RUNTIME_ERROR("Attempt to add a component to an entity which already has an instance of it\n");
+        RUNTIME_ERROR(
+            "Attempt to add a {} to an entity which already has an instance of it",
+            cid.type().name());
     }
 
-    if(!add && !archetype.archetype.test(dcid))
+    if(!add && !archetype.archetype.has_component(cid))
     {
-        RUNTIME_ERROR("Attempt to remove a component from an entity which does not have an instance of it\n");
+        RUNTIME_ERROR(
+            "Attempt to remove {} from an entity which does not have an instance of it",
+            cid.type().name());
     }
 
-    auto merged = archetype.archetype;
+    // Calculate the newly formed archetype
+    auto merged_bits = archetype.archetype.bits();
     if(add)
     {
-        merged.set(dcid);
+        merged_bits.set(cid.value());
     }
     else 
     {
-        merged.unset(dcid);
+        merged_bits.unset(cid.value());
     }
 
+    auto merged = Archetype::from_bits(MOVE(merged_bits));
+
+    // If our new archetype already exists in the scene,
+    // return its storage and cache its relationship to the
+    // provided archetype.
     if(auto it = archetype_map.find(merged); it != archetype_map.end())
     {
         related_set(related_it->second, it->second);
         return archetype_stores[it->second];
     }
 
-    auto inst = ArchetypeStorage{};
-    auto edge = ArchetypeEdge{};
+    // Build a new archetype storage from the new archetype.
+    auto inst = detail::ArchetypeStorage{};
+    auto edge = detail::ArchetypeEdge{};
     inverse_related_set(edge, archetype_id);
 
-    inst.archetype = std::move(merged);
+    inst.archetype = MOVE(merged);
     inst.related_archetypes[cid] = edge;
 
     for(auto &[component, vec] : archetype.component_stores)
@@ -157,18 +260,15 @@ ArchetypeStorage &Entities::add_or_remove_from_archetype(types::TypeDescriptor c
             continue;
         }
 
-        inst.component_stores[component] = {vec.get_element_size(), vec.get_descriptor()};
+        inst.create_storage_for(cid);
     }
     
     if(add)
     {
-        if(cid.packed_size() > 0)
-        {
-            inst.component_stores[cid] = dib::structures::ErasedVec{ cid.packed_size(), cid };
-        }
+        inst.create_storage_for(cid);
     }
 
-    auto result = register_archetype(std::move(inst));
+    auto result = register_archetype(MOVE(inst));
     related_set(archetype_stores[archetype_id].related_archetypes[cid], result);
 
     return archetype_stores[result];
@@ -188,7 +288,7 @@ uint64_t Entities::alloc_entity()
     return free;
 }
 
-uint64_t Entities::alloc_in_arch(ArchetypeStorage &storage)
+uint64_t Entities::alloc_in_arch(detail::ArchetypeStorage &storage)
 {
     if(storage.free_indices.empty())
     {
@@ -214,23 +314,104 @@ void Entities::dealloc_entity(uint64_t index)
     free_ids.push_back(index);
 }
 
-bool Entities::has_component(EntityID id, types::TypeDescriptor cid) const
+bool Entities::has_component(Entity id, ComponentID cid) const
 {
-    return archetype_stores[entity_map[id.index].archetype].archetype.test(detail::dense_component_type(cid));
+    assert_exists(id);
+    return archetype_stores[entity_map[id.index].archetype].archetype.has_component(cid);
 }
 
-EntityID Entities::create_entity()
+void Entities::assert_exists(Entity id) const
 {
-    auto entity_id = alloc_entity();
-    auto &entry = entity_map[entity_id];
+    if(entity_map.size() <= id.index || entity_map[id.index].version != id.version)
+    {
+        RUNTIME_ERROR("Invalid access to entity with id {}.", auto(id.index));
+    }
+}
+
+void Entities::assert_has_component(Entity id, ComponentID cid) const
+{
+    if(!has_component(id, cid))
+    {
+        RUNTIME_ERROR("Attempt to access a component of type {} which does not exist.", cid.type().name());
+    }
+}
+
+bool Entities::is_alive(Entity id) const
+{
+    return entity_map.size() > id.index && entity_map[id.index].version == id.version;
+}
+
+Entity Entities::create_entity()
+{
+    auto index = alloc_entity();
+    auto &entry = entity_map[index];
     
     entry.archetype = 0;
     entry.index = alloc_in_arch(archetype_stores[0]);
 
-    return {entity_id, entry.version};
+    auto entity_id = Entity(index, entry.version);
+    archetype_stores[0].entity_ids[entry.index] = entity_id;
+
+    return entity_id;
 }
 
-void Entities::add_component_raw(EntityID id, types::TypeDescriptor cid, dib::structures::ErasedPtr value)
+Entity Entities::create_uninitialized_entity(const Archetype &archetype)
+{
+    detail::ArchetypeID archetype_id;
+
+    if(auto it = archetype_map.find(archetype); it != archetype_map.end())
+    {
+        archetype_id = it->second;
+    }
+    else
+    {
+        auto new_storage = detail::ArchetypeStorage{};
+        new_storage.archetype = archetype;
+        
+        for(auto cid : new_storage.archetype.bits())
+        {
+            new_storage.create_storage_for(
+                ComponentID(cid));
+        }
+
+        archetype_id = register_archetype(MOVE(new_storage));
+    }
+    
+    auto index = alloc_entity();
+    auto &entry = entity_map[index];
+
+    entry.archetype = archetype_id;
+    entry.index = alloc_in_arch(archetype_stores[archetype_id]);
+
+    auto entity_id = Entity(index, entry.version);
+    archetype_stores[archetype_id].entity_ids[entry.index] = entity_id;
+
+    return entity_id;
+}
+
+void *Entities::get_component_raw(Entity id, ComponentID cid)
+{
+    assert_exists(id);
+    assert_has_component(id, cid);
+    
+    if(cid.type().packed_size() == 0)
+    {
+        return mem::pointer_to_zst<void>();
+    }
+    
+    auto &entry = entity_map[id.index];
+    auto &storage = archetype_stores[entry.archetype];
+    auto &vec = storage.component_stores[cid];
+
+    return vec.pointer(entry.index);
+}
+
+const void *Entities::get_component_raw(Entity id, ComponentID cid) const
+{
+    return const_cast<Entities*>(this)->get_component_raw(id, cid);
+}
+
+void Entities::add_component_raw(Entity id, ComponentID cid, dib::structures::ErasedPtr value)
 {
     assert_exists(id);
 
@@ -256,7 +437,7 @@ void Entities::add_component_raw(EntityID id, types::TypeDescriptor cid, dib::st
     entry.index = new_pos;
 }
 
-void Entities::remove_component(EntityID id, types::TypeDescriptor cid)
+void Entities::remove_component(Entity id, ComponentID cid)
 {
     assert_exists(id);
 
@@ -286,7 +467,7 @@ void Entities::remove_component(EntityID id, types::TypeDescriptor cid)
     entry.index = new_pos;
 }
 
-void Entities::destroy_entity(EntityID id)
+void Entities::destroy_entity(Entity id)
 {
     assert_exists(id);
 
@@ -304,177 +485,15 @@ void Entities::destroy_entity(EntityID id)
 }
 
 // Commands //
-struct DestroyEntityHeader
-{
-    EntityID id;
-};
-
-struct CreateEntityHeader
-{
-    uint8_t component_count;
-};
-
-struct AddComponentHeader
-{
-    EntityID entity;
-};
-
-struct RemoveComponentHeader
-{
-    EntityID entity;
-    types::TypeDescriptor id;
-};
-
-void Commands::push_create_entity(uint8_t component_count)
-{
-    CreateEntityHeader header;
-    header.component_count = component_count;
-
-    entries.push(header);
-}
-
-void Commands::push_destroy_entity(EntityID entity)
-{
-    DestroyEntityHeader header;
-    header.id = entity;
-
-    entries.push(header);
-}
-
-void Commands::push_remove_component(EntityID entity, types::TypeDescriptor id)
-{
-    RemoveComponentHeader header;
-    header.entity = entity;
-    header.id = id;
-
-    entries.push(header);
-}
-
-void Commands::push_add_component(EntityID entity)
-{
-    AddComponentHeader header;
-    header.entity = entity;
-
-    entries.push(header);
-}
-
 void Commands::flush()
 {
     while(entries.size_bytes() > 0)
     {
-        if(entries.top().type == types::typedesc<AddComponentHeader>)
-        {
-            auto entry = entries.top_as<AddComponentHeader>();
-            entries.pop();
+        auto command = entries.top_as<CommandPtr>();
+        entries.pop();
 
-            storage->add_component_raw(entry.entity, entries.top().type, entries.top().pointer);
-            entries.pop_nondestructive();
-        }
-        else if(entries.top().type == types::typedesc<RemoveComponentHeader>)
-        {
-            auto entry = entries.top_as<RemoveComponentHeader>();
-            entries.pop();
-
-            storage->remove_component(entry.entity, entry.id);
-        }
-        else if(entries.top().type == types::typedesc<DestroyEntityHeader>)
-        {
-            auto entry = entries.top_as<DestroyEntityHeader>();
-            entries.pop();
-
-            storage->destroy_entity(entry.id);
-        }
-        else if(entries.top().type == types::typedesc<CreateEntityHeader>)
-        {
-            auto component_count = entries.top_as<CreateEntityHeader>().component_count;
-            entries.pop();
-            auto id = storage->create_entity();
-                
-            for(size_t i = 0; i < component_count; i++)
-            {
-                storage->add_component_raw(id, entries.top().type, entries.top().pointer);
-                entries.pop_nondestructive();
-            }
-        }
+        command(this);
     }
     
     ASSERT(entries.size_bytes() == 0);
-}
-
-// BasicQueryIterator //
-void BasicQueryIterator::advance_to_valid()
-{
-    if(arch_it >= arch->size())
-        return;
-    
-    if(place_it == storage().capacity)
-    {
-        arch_it++;
-        place_it = 0;
-        
-        if(!arch || arch_it >= arch->size())
-            return;
-    }
-            
-    while(storage().entity_ids[place_it].index == INVALID_ID)
-    {
-        place_it++;
-
-        if(place_it == storage().capacity)
-        {
-            arch_it++;
-            place_it = 0;
-
-            if(!arch || arch_it >= arch->size())
-                return;
-        }
-    }
-}
-
-void BasicQueryIterator::advance()
-{
-    place_it++;
-    advance_to_valid();
-}
-
-BasicQueryIterator::BasicQueryIterator(Entities *world, const std::vector<ArchetypeID> &arch)
-{
-    this->entities = world;
-    this->arch = &arch;
-
-    arch_it = 0;
-    place_it = 0;
-    
-    advance_to_valid();
-}
-
-BasicQueryIterator::BasicQueryIterator(End_t, Entities *world, const std::vector<ArchetypeID> &arch)
-{
-    this->entities = world;
-    this->arch = &arch;
-
-    arch_it = arch.size();
-    place_it = 0;
-}
-
-BasicQueryIterator::BasicQueryIterator(Entities *world, ArchetypeID singlet)
-{
-    this->entities = world;
-    this->arch = nullptr;
-    this->singlet_arch = singlet;
-
-    arch_it = 0;
-    place_it = 0;
-    
-    advance_to_valid();
-}
-
-BasicQueryIterator::BasicQueryIterator(End_t, Entities *world, ArchetypeID arch)
-{
-    this->entities = world;
-    this->arch = nullptr;
-    this->singlet_arch = arch;
-
-    arch_it = 1;
-    place_it = 0;
 }

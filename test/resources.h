@@ -1,7 +1,7 @@
 #include "resources.h"
 #include <iostream>
 
-using namespace dib::resources;
+using namespace dib::res;
 namespace fs = std::filesystem;
 
 int main()

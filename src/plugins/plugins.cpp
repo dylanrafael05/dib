@@ -6,10 +6,15 @@
 
 using namespace dib;
 using namespace dib::plugins;
-using namespace dib::app;
 using namespace dib::ecs;
 
 namespace gr = dib::ecs::groups;
+
+namespace dib::plugins::groups
+{
+    ecs::decl::SystemGroup RenderWorld;
+    ecs::decl::SystemGroup RenderUI;
+}
 
 struct RenderSettings
 {
@@ -19,8 +24,8 @@ struct RenderSettings
 void AudioPlugin::inject(App &app) const
 {
     app.systems().add({
-        system(gr::OnInit,   InitAudioDevice),
-        system(gr::OnDeinit, CloseAudioDevice)
+        System(gr::OnInit,   InitAudioDevice),
+        System(gr::OnDeinit, CloseAudioDevice)
     });
 }
 
@@ -43,18 +48,23 @@ void begin_draw_world()
 
     if(!cam.is_invalid())
     {
-        if(world.has_component<Camera2DT>(cam))
+        if(world.has_component<CameraComponent2D>(cam))
         {
-            BeginMode2D(world.get_component<Camera2DT>(cam).value);
+            BeginMode2D(world.get_component<CameraComponent2D>(cam).raylib);
         }
-        else if(world.has_component<Camera3DT>(cam))
+        else if(world.has_component<CameraComponent3D>(cam))
         {
-            BeginMode3D(world.get_component<Camera3DT>(cam).value);
+            BeginMode3D(world.get_component<CameraComponent3D>(cam).raylib);
         }
         else
         {
             RUNTIME_ERROR("The main camera provided to dib::plugins::CameraHandler must have either a 2d or 3d camera component.");
         }
+    }
+    else
+    {
+        // TODO: allow the user to specify a predicate which, when matched, prevents this check.
+        RUNTIME_ERROR("There must always be an active main camera!");
     }
 }
 
@@ -66,11 +76,11 @@ void end_draw_world()
 
     if(!cam.is_invalid())
     {
-        if(world.has_component<Camera2DT>(cam))
+        if(world.has_component<CameraComponent2D>(cam))
         {
             EndMode2D();
         }
-        else if(world.has_component<Camera3DT>(cam))
+        else if(world.has_component<CameraComponent3D>(cam))
         {
             EndMode3D();
         }
@@ -79,15 +89,20 @@ void end_draw_world()
             RUNTIME_ERROR("The main camera provided to dib::plugins::CameraHandler must have either a 2d or 3d camera component.");
         }
     }
+    else
+    {
+        // TODO: allow the user to specify a predicate which, when matched, prevents this check.
+        RUNTIME_ERROR("There must always be an active main camera!");
+    }
 }
 
 void RenderPlugin::inject(App &app) const
 {
     app.systems().add({
-        system(gr::OnInit, init_render),
-        system(gr::Render, clear_background),
-        system(gr::Render, plugins::groups::RenderWorld, options::init_with(begin_draw_world) | options::deinit_with(end_draw_world) | options::after(clear_background)),
-        system(gr::Render, plugins::groups::RenderUI, options::after(plugins::groups::RenderWorld))
+        System(gr::OnInit, init_render),
+        System(gr::Render, clear_background),
+        System(gr::Render, plugins::groups::RenderWorld, options::init_with(begin_draw_world) | options::deinit_with(end_draw_world) | options::after(clear_background)),
+        System(gr::Render, plugins::groups::RenderUI, options::after(plugins::groups::RenderWorld))
     });
 
     app.singletons()

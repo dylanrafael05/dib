@@ -10,7 +10,7 @@ inline void dib::app2::App::run()
     run(is_static);
 }
 
-inline dib::resources::Resources &dib::app2::resource_manager()
+inline dib::res::Resources &dib::app2::resource_manager()
 {
     return detail::resource_manager(use_batch);
 }

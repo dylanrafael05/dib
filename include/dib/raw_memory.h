@@ -4,17 +4,15 @@
 
 #include <concepts>
 #include <stddef.h>
-#include <memory>
 #include <mutex>
 #include <vector>
-#include <iostream>
-#include <bit>
 #include <utility>
-#include <typeinfo>
 
+#include "dib/reflect.h"
 #include "dib/types.h"
 #include "dib/raw_memory_utils.h"
-#include "dib/vector.h"
+#include "dib/debug.h"
+#include "dib/algorithm.h"
 
 namespace dib::mem
 {
@@ -272,7 +270,7 @@ namespace dib::structures
     class ErasedVec
     {
         size_t element_size = 0;
-        types::TypeDescriptor descriptor;
+        refl::Type descriptor;
 
         uint8_t *ptr = nullptr;
         size_t _size = 0;
@@ -281,8 +279,11 @@ namespace dib::structures
         void grow();
 
     public:
+        using iterator = dib::algorithm::BasicRandomAccessIterator<ErasedVec>;
+        using const_iterator = dib::algorithm::BasicRandomAccessIterator<const ErasedVec>;
+
         // TODO: element_size can be folded into the descriptor! yay!
-        ErasedVec(size_t element_size, types::TypeDescriptor descriptor)
+        ErasedVec(size_t element_size, refl::Type descriptor)
             : element_size(element_size), descriptor(descriptor), ptr(nullptr), _size(0), _capacity(0)
         {}
         ErasedVec()
@@ -290,7 +291,7 @@ namespace dib::structures
         {}
 
         size_t get_element_size() const {return element_size;}
-        types::TypeDescriptor get_descriptor() const {return descriptor;}
+        refl::Type get_descriptor() const {return descriptor;}
 
         void alloc_back();
         void push_back(ErasedPtr value);
@@ -342,12 +343,28 @@ namespace dib::structures
             return *(T*)pointer(index);
         }
 
+        dib::refl::AnyRef get(size_t index)
+        {
+            return { descriptor, pointer(index) };
+        }
+        const dib::refl::AnyRef get(size_t index) const
+        {
+            return { descriptor, pointer(index) };
+        }
+
+        iterator begin() { return {this, 0}; }
+        iterator end() { return begin() + size(); }
+        const_iterator begin() const { return { this, 0 }; }
+        const_iterator cbegin() const { return begin(); }
+        const_iterator end() const { return cbegin() + size(); }
+        const_iterator cend() const { return end(); }
+
         template<class T>
         static ErasedVec create()
         {
             return {
                 types::packed_sizeof<T>,
-                types::typedesc<T>
+                refl::typeof<T>
             };
         }
     };
@@ -368,7 +385,7 @@ namespace dib::structures
         /// @brief A value stored inside an instance of a stack
         struct Value
         {
-            types::TypeDescriptor type;
+            refl::Type type;
             void *pointer;
         };
 
@@ -377,7 +394,7 @@ namespace dib::structures
         /// wrapped in a memory::Forgotten and forgotten.
         /// @param size The size, in bytes, of the element being added.
         /// @param contents A pointer to the element.
-        void push(types::TypeDescriptor type, void *contents);
+        void push(refl::Type type, void *contents);
 
         /// Retrieve an element from this stack without removing it.
         Value top();
@@ -392,7 +409,7 @@ namespace dib::structures
         template<class T>
         void push(const T &contents)
         {
-            push(types::typedesc<T>, (void*) &contents);
+            push(refl::typeof<T>, (void*) &contents);
         }
 
         /// Templated and reference-friendly version of top
@@ -400,9 +417,10 @@ namespace dib::structures
         T &top_as()
         {
             auto value = top();
-            if (value.type != types::typedesc<T>)
+            if (value.type != refl::typeof<T>)
             {
-                RUNTIME_ERROR("Reading incorrect type from erased stack.");
+                RUNTIME_ERROR("Reading incorrect type from erased stack. Attempted to get as {}, but it is {}",
+                    refl::typeof<T>.name(), value.type.name());
             }
 
             return dib::mem::read_as<T>(value.pointer);
@@ -416,7 +434,7 @@ namespace dib::structures
     class ErasedSingleton
     {
         void *data;
-        types::TypeDescriptor type;
+        refl::Type type;
 
     public:
         ErasedSingleton()
@@ -427,16 +445,16 @@ namespace dib::structures
         template<class T>
         ErasedSingleton(T &&reference)
         {
-            data = new char[sizeof(T)];
-            new(data) T(std::forward<T>(reference));
+            data = new char[sizeof(std::remove_cvref_t<T>)];
+            new(data) T(FORWARD(reference));
 
-            type = types::typedesc<T>;
+            type = refl::typeof<T>;
         }
 
         template<class T>
         T &get() const 
         { 
-            if(types::typedesc<T> != type)
+            if(refl::typeof<T> != type)
                 RUNTIME_ERROR("Attempt to cast a singleton to a type it is not.");
             
             return *(T*)data;

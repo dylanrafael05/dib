@@ -4,17 +4,29 @@
 #include <fstream>
 #include <memory>
 #include <unordered_map>
+#include <sstream>
 #include <string_view>
 #include <vector>
 #include <list>
 #include <typeindex>
 
 #include "dib/json.h"
+#include "dib/reflect.h"
 #include "dib/types.h"
 
 #include "raylib.h"
 
-namespace dib::resources
+namespace dib::res
+{
+    class Resources;
+}
+
+namespace dib
+{
+    res::Resources &resources();
+}
+
+namespace dib::res
 {
     namespace detail
     {
@@ -63,8 +75,17 @@ namespace dib::resources
     template<class T>
     struct ResourceInterface
     {
-        static void load(Resources &resources, T &instance, std::string_view filename, const char *buffer, size_t size) {}
-        static void unload(Resources &resources, T &instance) {}
+        static void load(
+            [[maybe_unused]] Resources &resources, 
+            [[maybe_unused]] T &instance, 
+            [[maybe_unused]] std::string_view filename, 
+            [[maybe_unused]] const char *buffer, 
+            [[maybe_unused]] size_t size) 
+        {}
+        static void unload(
+            [[maybe_unused]] Resources &resources, 
+            [[maybe_unused]] T &instance) 
+        {}
         static constexpr bool free_underlying_once_loaded = false;
 
         using disable = void;
@@ -120,7 +141,7 @@ namespace dib::resources
 
     namespace detail
     {
-        dib::resources::ResourceStore *global_resource_store();
+        dib::res::ResourceStore *global_resource_store();
 
         /// The handle of a resource that has been loaded.
         class LoadedResource
@@ -160,11 +181,11 @@ namespace dib::resources
 
             LoadedResource &operator=(LoadedResource &&other) noexcept;
 
-            friend class dib::resources::ResourceStore;
-            friend class dib::resources::ResourceBatch;
-            friend class dib::resources::ResourceFolder;
+            friend class dib::res::ResourceStore;
+            friend class dib::res::ResourceBatch;
+            friend class dib::res::ResourceFolder;
             template<class>
-            friend class dib::resources::ResourceHandle;
+            friend class dib::res::ResourceHandle;
         };
     }
 
@@ -178,8 +199,8 @@ namespace dib::resources
         std::string_view _name;
         mutable const T *_cached;
 
-        friend class dib::resources::ResourceStore;
-        friend class dib::resources::Resources;
+        friend class dib::res::ResourceStore;
+        friend class dib::res::Resources;
         
         ResourceHandle(Resources &owner, std::string_view name);
 
@@ -212,15 +233,15 @@ namespace dib::resources
     class ResourceStore
     {
         template<class>
-        friend class dib::resources::ResourceHandle;
-        friend class dib::resources::Resources;
+        friend class dib::res::ResourceHandle;
+        friend class dib::res::Resources;
 
     protected:
         using Loader = detail::LoadedResource(*)(Resources &owner, std::string_view filename, char *buffer, size_t size);
         virtual const detail::LoadedResource &get_loaded(
             std::string_view name, Loader loader, size_t re_size, bool free_underlying_once_loaded, bool open_as_text) = 0;
 
-        Resources *_owner;
+        Resources *_owner = nullptr;
         
         void set_owner(Resources &owner);
 
@@ -276,7 +297,7 @@ namespace dib::resources
         , _name(name)
         , _cached(nullptr)
     {
-        if(_owner->supports_dynamic_reload())
+        if(!_owner->supports_dynamic_reload())
         {
             get();
         }
@@ -297,9 +318,9 @@ namespace dib::resources
             
         if(resource._type != typeid(T))
         {
-            RUNTIME_ERROR(std::format(
+            RUNTIME_ERROR(
                 "Resource {} is of type {}, but is being read as type {}", 
-                _name, resource._type.name(), types::typedesc<T>.name()));
+                _name, resource._type.name(), refl::typeof<T>.name());
         }
 
         if(!_owner->supports_dynamic_reload())
@@ -307,7 +328,7 @@ namespace dib::resources
             _cached = (const T*)resource._data;
         }
 
-        return *_cached;
+        return *(const T*)resource._data;
     }
 
     class ResourceBatch final : public ResourceStore
@@ -405,7 +426,12 @@ namespace dib::resources
     // Default implementations of ResourceInterface //
     template<> struct ResourceInterface<Text>
     {
-        static void load(Resources &resources, Text &instance, std::string_view filename, const char *buffer, size_t size);
+        static void load(
+            [[maybe_unused]] Resources &resources, 
+            [[maybe_unused]] Text &instance, 
+            [[maybe_unused]] std::string_view filename, 
+            [[maybe_unused]] const char *buffer, 
+            [[maybe_unused]] size_t size);
 
         static constexpr bool open_as_text = true;
     };
@@ -415,7 +441,7 @@ namespace dib::resources
     {
         static_assert(json::HasCustomInterface<T>, "JsonResources must correctly provide a json interface");
 
-        static void load(Resources &resources, T &instance, std::string_view filename, const char *buffer, size_t size)
+        static void load(Resources &, T &instance, std::string_view, const char *buffer, size_t)
         {
             std::stringstream buffer_stream(buffer);
             json::JsonReader json_read(buffer_stream);

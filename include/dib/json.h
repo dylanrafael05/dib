@@ -661,7 +661,7 @@ namespace dib::json
         {
             if (reader.at_null())
             {
-                Null n = null; reader.read_null();
+                reader.read_null();
                 value = dib::option::none;
             }
             else
@@ -702,7 +702,7 @@ namespace dib::json
 
             void throw_impl(const std::string_view &msg)
             {
-                RUNTIME_ERROR(std::format("Error reading json: {}", msg));
+                RUNTIME_ERROR("Error reading json: {}", msg);
             }
         };
 
@@ -728,7 +728,7 @@ namespace dib::json
 
             void throw_impl(const std::string_view &msg)
             {
-                RUNTIME_ERROR(std::format("Error writing json: {}", msg));
+                RUNTIME_ERROR("Error writing json: {}", msg);
             }
         };
 

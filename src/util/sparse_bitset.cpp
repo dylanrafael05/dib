@@ -256,6 +256,9 @@ void det::SparseBitset_Impl::set(size_t index, EntryAllocatorFuncs alloc)
     auto entry = get_entry(index);
     auto loc = new_entry(entry, alloc);
 
+    if((loc->bits & mask(index)) == 0)
+        _popcount++;
+
     loc->bits |= mask(index);
 }
 
@@ -266,6 +269,9 @@ void det::SparseBitset_Impl::unset(size_t index, EntryAllocatorFuncs alloc)
 
     if(!valid_iterator(loc, entry, end_entries()))
         return;
+    
+    if((loc->bits & mask(index)) != 0)
+        _popcount--;
 
     loc->bits &= ~mask(index);
 
@@ -311,6 +317,11 @@ bool det::SparseBitset_Impl::is_subset_of(const SparseBitset_Impl &other) const
     }
 
     return true;
+}
+
+size_t det::SparseBitset_Impl::popcount() const
+{
+    return _popcount;
 }
 
 // Set operations //

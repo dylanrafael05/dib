@@ -1,11 +1,9 @@
 #include "dib/app.h"
-#include "dib/ecs/world.h"
 #include "dib/ecs/systems.h"
 #include "raylib.h"
 
 using namespace dib;
 using namespace dib::ecs;
-using namespace dib::app;
 
 void flush_commands()
 {

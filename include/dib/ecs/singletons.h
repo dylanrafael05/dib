@@ -7,6 +7,19 @@
 #include "dib/option.h"
 #include "dib/debug.h"
 #include "dib/preprocess.h"
+#include "dib/types.h"
+
+namespace dib::ecs
+{
+    struct Singletons;
+    struct Messages;
+}
+
+namespace dib
+{
+    ecs::Singletons &singletons();
+    ecs::Messages &messages();
+}
 
 namespace dib::ecs
 {
@@ -16,17 +29,19 @@ namespace dib::ecs
         template<class T, class... Args>
         Singletons &create(Args &&...args)
         {
-            if (singletons.count({ typeid(T) }) > 0)
-                return *this;
+            if (has<T>())
+            {
+                RUNTIME_ERROR("Cannot create multiple instances of singleton type {}.", types::nameof<T>);
+            }
 
-            singletons[{typeid(T)}] = T(FORWARD(args)...);
+            singletons[refl::typeof<T>] = T(FORWARD(args)...);
             return *this;
         }
 
         template<class T, class... Args>
         T &get_new(Args&& ...args)
         {
-            if (singletons.count({ typeid(T) }) != 0)
+            if (has<T>())
                 return get<T>();
 
             create<T>(FORWARD(args)...);
@@ -36,25 +51,25 @@ namespace dib::ecs
         template<class T>
         T &get()
         {
-            if (singletons.count({ typeid(T) }) == 0)
+            if (!has<T>())
             {
                 RUNTIME_ERROR("Attempt to get a singleton which does not exist.");
             }
 
-            return singletons[{typeid(T)}].template get<T>();
+            return singletons[refl::typeof<T>].template get<T>();
         }
 
         template<class T>
-        bool has() const { return singletons.contains({ typeid(T) }); }
+        bool has() const { return singletons.contains(refl::typeof<T>); }
 
         template<class T>
         void remove()
         {
-            singletons.erase({ typeid(T) });
+            singletons.erase(refl::typeof<T>);
         }
 
     private:
-        std::unordered_map<std::type_index, dib::structures::ErasedSingleton> singletons;
+        std::unordered_map<refl::Type, dib::structures::ErasedSingleton> singletons;
 	};
 
     class Messages

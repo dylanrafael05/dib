@@ -160,13 +160,13 @@ namespace dib::app2
     
     namespace detail
     {
-        dib::resources::Resources &resource_manager(bool use_batch);
+        dib::res::Resources &resource_manager(bool use_batch);
     }
     
     App &instance();
     dib::ecs::Scene &scene();
     dib::ecs::Commands& commands();
-    extern dib::resources::Resources &resource_manager();
+    extern dib::res::Resources &resource_manager();
 }
 
 #endif

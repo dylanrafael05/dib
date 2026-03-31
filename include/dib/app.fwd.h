@@ -1,9 +1,6 @@
-#ifndef __DIB_ECS_APP_FWD_H
-#define __DIB_ECS_APP_FWD_H
+#pragma once
 
-namespace dib::app
+namespace dib
 {
 	class App;
 }
-
-#endif

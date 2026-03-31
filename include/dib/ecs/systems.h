@@ -1,23 +1,22 @@
 #pragma once
 
-#include <type_traits>
 #include <concepts>
 #include <vector>
 #include <variant>
 #include <memory>
 
+#include "dib/record.h"
 #include "dib/types.h"
 #include "dib/functional.h"
 #include "dib/pointers.h"
 #include "dib/ecs/systems_fwd.h"
 #include "dib/ecs/world.h"
-#include "dib/app.fwd.h"
 
 namespace dib::ecs
 {
 	// System function creation //
 	template<class R>
-	struct BasicSystemFn : types::HashProvided
+	struct [[=provides_hash]] BasicSystemFn
 	{
 	public:
 		BasicSystemFn(R(*fn)())
@@ -130,13 +129,6 @@ namespace dib::ecs
 			option(FORWARD(opt));
 		}
 
-		template<types::IsDerivedFrom<detail::SystemOption> Opt>
-		System(SystemGroup group, SystemAction &&action, const Opt &opt)
-			: System(group, MOVE(action))
-		{
-			option(opt);
-		}
-
 		void execute(const Systems &scheduler, World &world) const;
 
 		friend struct Systems;
@@ -206,10 +198,4 @@ namespace dib::ecs
 		bool _built = false;
 		std::unordered_map<SystemGroup, detail::SystemGroupInstance> _groups;
 	};
-	
-	template<class ...Args>
-	auto system(Args &&...args)
-	{
-		return System(FORWARD(args)...);
-	}
 }

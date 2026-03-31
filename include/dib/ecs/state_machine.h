@@ -8,7 +8,16 @@
 #include "dib/ecs/world_fwd.h"
 #include "dib/ecs/systems_fwd.h"
 #include "dib/debug.h"
-#include "dib/types.h"
+
+namespace dib::ecs
+{
+	struct StateMachine;
+}
+
+namespace dib
+{
+	ecs::StateMachine &state_machine();
+}
 
 namespace dib::ecs
 {
@@ -47,7 +56,7 @@ namespace dib::ecs
 		{
 			if (_current_state.contains(typeid(T)))
 			{
-				RUNTIME_ERROR(std::format("Attempt to initialize a state of type {} twice.", types::typedesc<T>.name()));
+				RUNTIME_ERROR("Attempt to initialize a state of type {} twice.", types::nameof<T>);
 			}
 
 			auto &state = _current_state[typeid(T)];

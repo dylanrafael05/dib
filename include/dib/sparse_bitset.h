@@ -5,6 +5,7 @@
 #include <array>
 #include <memory>
 
+#include "dib/record.h"
 #include "dib/types.h"
 #include "dib/functional.h"
 
@@ -44,7 +45,7 @@ namespace dib::structures
         };
         
         /// The base implementation of a sparse bitset, agnostic of allocator
-        class SparseBitset_Impl : public types::HashProvided
+        class [[=provides_hash]] SparseBitset_Impl
         {
         protected:
             // Helper typedefs //
@@ -59,6 +60,7 @@ namespace dib::structures
             };
 
             size_t count;
+            size_t _popcount;
 
             Entry *begin_entries();
             const Entry *begin_entries() const;
@@ -87,7 +89,9 @@ namespace dib::structures
         public:
             constexpr static size_t MAX_INDEX = (1 << 16) * 16;
 
-            SparseBitset_Impl() : stack(), count(0) {}
+            SparseBitset_Impl() : stack(), count(0), _popcount(0) {}
+
+            size_t popcount() const;
 
             bool test(size_t value) const;
             size_t get_hash() const;
@@ -102,7 +106,7 @@ namespace dib::structures
         };
         
         static_assert(
-            dib::types::IsHashProvided<SparseBitset_Impl>, 
+            dib::types::IsHashable<SparseBitset_Impl>, 
             "SparseBitset_Impl should provide hash properly!");
     }
 

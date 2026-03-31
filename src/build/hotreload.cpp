@@ -125,7 +125,7 @@ void DynamicContext::reload(std::string_view module)
     // TODO: use proper build settings here instead of the default.
 
     auto newfile = entry.mod->dll_file(env::executable_directory_path());
-    auto updtstr = std::to_string(last_update.time_since_epoch().count());
+    auto updtstr = std::to_string((long long)last_update.time_since_epoch().count());
     newfile.replace_filename(updtstr + "." + newfile.filename().string());
 
     entry.mod->build(project::default_build_settings(), newfile);

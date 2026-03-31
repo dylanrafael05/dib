@@ -1,19 +1,14 @@
 #pragma once
 
 #include "dib/types.h"
+#include "dib/record.h"
+#include <cstdint>
 
 namespace dib::ecs
 {
-	struct SystemGroup : types::HashProvided
+	struct [[=provides_hash]] SystemGroup
 	{
-		static SystemGroup create()
-		{
-			static unsigned int id_counter = 1;
-
-			SystemGroup grp;
-			grp.id = id_counter++;
-			return grp;
-		}
+		static SystemGroup create();
 
 		constexpr static SystemGroup invalid() { return {}; }
 		constexpr bool is_invalid() const { return id == 0; }
@@ -26,10 +21,8 @@ namespace dib::ecs
 		auto operator<=>(const SystemGroup &other) const = default;
 		bool operator==(const SystemGroup &other) const = default;
 
-		friend struct SystemGroupGenerator;
-
 	private:
-		unsigned int id = 0;
+		uint32_t id = 0;
 	};
 
 	namespace decl
@@ -57,28 +50,30 @@ namespace dib::ecs
 
 	namespace groups
 	{
-		inline decl::SystemGroup Main;
+		extern decl::SystemGroup Main;
 
-		inline decl::SystemGroup First;
-		inline decl::SystemGroup Last;
+		extern decl::SystemGroup First;
+		extern decl::SystemGroup Last;
 
-		inline decl::SystemGroup PreUpdate;
-		inline decl::SystemGroup Update;
-		inline decl::SystemGroup PostUpdate;
+		extern decl::SystemGroup PreUpdate;
+		extern decl::SystemGroup Update;
+		extern decl::SystemGroup PostUpdate;
 
-		inline decl::SystemGroup StartRender;
-		inline decl::SystemGroup Render;
-		inline decl::SystemGroup EndRender;
+		extern decl::SystemGroup StartRender;
+		extern decl::SystemGroup Render;
+		extern decl::SystemGroup EndRender;
 
-		inline decl::SystemGroup OnInit;
-		inline decl::SystemGroup OnDeinit;
+		extern decl::SystemGroup OnInit;
+		extern decl::SystemGroup OnDeinit;
 
-		inline decl::SystemGroup Start;
+		extern decl::SystemGroup Start;
 
-		inline decl::SystemGroup HandleStateTransitions;
+		extern decl::SystemGroup HandleStateTransitions;
 
 		namespace detail
 		{
+			// TODO: this needs to be exfiltrated to the dll,
+			// rather than provided in header!
 			template<class Arg>
 			struct Generator
 			{
@@ -143,4 +138,9 @@ namespace dib::ecs
 
 	struct Systems;
 	struct System;
+}
+
+namespace dib
+{
+	ecs::Systems &systems();
 }

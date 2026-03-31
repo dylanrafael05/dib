@@ -11,15 +11,34 @@
 #include <algorithm>
 #include <filesystem>
 
-namespace fs = std::filesystem;
 using namespace std;
 using namespace std::string_view_literals;
 using namespace dib;
-using namespace dib::resources;
-using namespace dib::resources::detail;
+using namespace dib::res;
+using namespace dib::res::detail;
+
+namespace fs = std::filesystem;
+namespace rdetail = dib::res::detail;
+
+/// Note: fs::file_size doesnt work for .obj files?!?!?
+size_t fixed_file_size(const fs::path &path)
+{
+    std::ifstream stream(path, ios::binary);
+
+    if(stream.bad())
+    {
+        RUNTIME_ERROR("Cannot get size of file {}", path.string());
+    }
+
+    auto st = stream.tellg();
+    stream.seekg(0, stream.end);
+    auto e = stream.tellg();
+
+    return e - st;
+}
 
 // Helper methods //
-void dib::resources::detail::read_big_endian(fstream &stream, char *buffer, size_t size)
+void rdetail::read_big_endian(fstream &stream, char *buffer, size_t size)
 {
     stream.read(buffer, size);
 
@@ -29,7 +48,7 @@ void dib::resources::detail::read_big_endian(fstream &stream, char *buffer, size
     }
 }
 
-void dib::resources::detail::write_big_endian(fstream &stream, const char *buffer, size_t size)
+void rdetail::write_big_endian(fstream &stream, const char *buffer, size_t size)
 {
     if constexpr(endian::native == endian::big)
     {
@@ -44,7 +63,7 @@ void dib::resources::detail::write_big_endian(fstream &stream, const char *buffe
     }
 }
 
-void dib::resources::detail::salt_buffer(char *buffer, uint64_t size, uint32_t salt)
+void rdetail::salt_buffer(char *buffer, uint64_t size, uint32_t salt)
 {
     auto salt_arr = bit_cast<array<char, 4>>(salt);
 
@@ -62,7 +81,7 @@ void dib::resources::detail::salt_buffer(char *buffer, uint64_t size, uint32_t s
     }
 }
 
-void dib::resources::detail::unsalt_buffer(char *buffer, uint64_t size, uint32_t salt)
+void rdetail::unsalt_buffer(char *buffer, uint64_t size, uint32_t salt)
 {
     salt_buffer(buffer, size, salt);
 }
@@ -74,10 +93,10 @@ auto file_load_callback(
 {
     std::string_view filename = filename_c;
 
-    if(filename.starts_with(resources::raylib_resources))
+    if(filename.starts_with(res::raylib_resources))
     {
-        auto resource_name = filename.substr(resources::raylib_resources.size());
-        auto &resources = dib::app::this_app().resources();
+        auto resource_name = filename.substr(res::raylib_resources.size());
+        auto &resources = dib::this_app().resources();
         auto resource_size = resources.store().get_content_size(resource_name);
 
         *bytes_read = (int) resource_size;
@@ -103,24 +122,24 @@ auto file_load_callback(
     }
 }
 
-unsigned char *dib::resources::detail::file_load_data_callback(const char *filename_c, int *bytes_read)
+unsigned char *rdetail::file_load_data_callback(const char *filename_c, int *bytes_read)
 {
     return (unsigned char *)file_load_callback<false>(filename_c, bytes_read, SetLoadFileDataCallback, file_load_data_callback);
 }
 
-char *dib::resources::detail::file_load_text_callback(const char *filename_c)
+char *rdetail::file_load_text_callback(const char *filename_c)
 {
     int dummy;
     return (char *)file_load_callback<true>(filename_c, &dummy, SetLoadFileDataCallback, file_load_data_callback);
 }
 
 // Resource //
-ResourceStore *detail::global_resource_store()
+ResourceStore *rdetail::global_resource_store()
 {
-    return &dib::app::this_app().resources().store();
+    return &dib::this_app().resources().store();
 }
 
-void detail::LoadedResource::move_from(detail::LoadedResource &&other)
+void rdetail::LoadedResource::move_from(rdetail::LoadedResource &&other)
 {
     _type = other._type;
     _re_size = other._re_size;
@@ -131,7 +150,7 @@ void detail::LoadedResource::move_from(detail::LoadedResource &&other)
     other._data = nullptr;
 }
 
-void detail::LoadedResource::destruct()
+void rdetail::LoadedResource::destruct()
 {
     if(_data)
     {
@@ -141,7 +160,7 @@ void detail::LoadedResource::destruct()
     }
 }
 
-detail::LoadedResource::LoadedResource()
+rdetail::LoadedResource::LoadedResource()
     : _owner(nullptr)
     , _type(typeid(nullptr))
     , _re_size(0)
@@ -149,25 +168,25 @@ detail::LoadedResource::LoadedResource()
     , _destructor(nullptr)
 {}
 
-detail::LoadedResource::LoadedResource(detail::LoadedResource &&other) noexcept
+rdetail::LoadedResource::LoadedResource(rdetail::LoadedResource &&other) noexcept
     : _type(typeid(nullptr))
 {
     move_from(MOVE(other));
 }
 
-detail::LoadedResource::~LoadedResource()
+rdetail::LoadedResource::~LoadedResource()
 {
     destruct();
 }
 
-detail::LoadedResource &detail::LoadedResource::operator=(detail::LoadedResource &&other) noexcept
+rdetail::LoadedResource &rdetail::LoadedResource::operator=(rdetail::LoadedResource &&other) noexcept
 {
     destruct();
     move_from(std::move(other));
     return *this;
 }
 
-detail::LoadedResource::LoadedResource(
+rdetail::LoadedResource::LoadedResource(
     Resources &owner, std::type_index type, 
     size_t re_size, char *data, 
     void (*destructor)(Resources &, void *))
@@ -178,7 +197,7 @@ detail::LoadedResource::LoadedResource(
     , _destructor(destructor)
 {}
 
-void detail::LoadedResource::free_underlying_buffer()
+void rdetail::LoadedResource::free_underlying_buffer()
 {
     char *new_data = new char[_re_size];
     std::memcpy(new_data, _data, _re_size);
@@ -188,7 +207,7 @@ void detail::LoadedResource::free_underlying_buffer()
 }
 
 // ResourceStore //
-void dib::resources::ResourceStore::set_owner(dib::resources::Resources &owner)
+void dib::res::ResourceStore::set_owner(dib::res::Resources &owner)
 {
     if(_owner)
         RUNTIME_ERROR("Setting owner of resource store more than once!");
@@ -197,7 +216,7 @@ void dib::resources::ResourceStore::set_owner(dib::resources::Resources &owner)
 }
 
 // ResourceBatch //
-void dib::resources::ResourceBatch::parse_header()
+void dib::res::ResourceBatch::parse_header()
 {
     file.seekg(0);
 
@@ -251,7 +270,7 @@ void dib::resources::ResourceBatch::parse_header()
     }
 }
 
-const detail::LoadedResource &dib::resources::ResourceBatch::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool)
+const rdetail::LoadedResource &dib::res::ResourceBatch::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool)
 {
     auto key_it = resource_keys.find(name);
     if(key_it == resource_keys.end())
@@ -282,7 +301,7 @@ const detail::LoadedResource &dib::resources::ResourceBatch::get_loaded(std::str
     return loaded_resources[key.index];
 }
 
-void dib::resources::ResourceBatch::make_from_directory(const fs::path &directory, const fs::path &output)
+void dib::res::ResourceBatch::make_from_directory(const fs::path &directory, const fs::path &output)
 {
     fstream output_file(output, ios::out | ios::binary);
     output_file.write("dibbatch", 8);
@@ -353,7 +372,7 @@ void dib::resources::ResourceBatch::make_from_directory(const fs::path &director
     }
 }
 
-void dib::resources::ResourceBatch::open(const fs::path &file)
+void dib::res::ResourceBatch::open(const fs::path &file)
 {
     if(this->file.is_open())
     {
@@ -363,7 +382,7 @@ void dib::resources::ResourceBatch::open(const fs::path &file)
     this->file.open(file, std::ios::in | std::ios::binary);
 }
 
-size_t dib::resources::ResourceBatch::get_content_size(std::string_view filename) const
+size_t dib::res::ResourceBatch::get_content_size(std::string_view filename) const
 {
     auto key = resource_keys.find(filename);
 
@@ -373,7 +392,7 @@ size_t dib::resources::ResourceBatch::get_content_size(std::string_view filename
     return key->second.size_bytes;
 }
 
-void dib::resources::ResourceBatch::copy_content_to_buffer(std::string_view filename, void *buffer, bool) const
+void dib::res::ResourceBatch::copy_content_to_buffer(std::string_view filename, void *buffer, bool) const
 {
     auto key = resource_keys.find(filename);
 
@@ -386,71 +405,85 @@ void dib::resources::ResourceBatch::copy_content_to_buffer(std::string_view file
     unsalt_buffer((char*) buffer, key->second.size_bytes, key->second.salt);
 }
 
-fs::path dib::resources::resource_batch_location()
+fs::path dib::res::resource_batch_location()
 {
     return dib::env::executable_directory_path() / ".dbatch";
 }
 
 // ResourceFolder //
-const detail::LoadedResource &dib::resources::ResourceFolder::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text)
+const rdetail::LoadedResource &dib::res::ResourceFolder::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text)
 {
     using namespace std::chrono;
 
     auto it = loaded_resources.find(name);
     bool should_reload = it == loaded_resources.end();
 
-    if(it != loaded_resources.end())
+    try
     {
-        auto now = resource_time_of_load[name];
 
-        auto filename = folder / name;
-        auto filetime = std::filesystem::last_write_time(filename).time_since_epoch();
-
-        if(filetime > now)
+        if(it != loaded_resources.end())
         {
-            should_reload = true;
-            loaded_resources.erase(it);
-        }
-    }
+            auto now = resource_time_of_load[name];
 
-    if(should_reload)
+            auto filename = fs::canonical(folder / name);
+            auto filetime = std::filesystem::last_write_time(filename).time_since_epoch();
+
+            if(filetime > now)
+            {
+                should_reload = true;
+                loaded_resources.erase(it);
+            }
+        }
+
+        if(should_reload)
+        {
+            auto filename = fs::canonical(folder / name);
+
+            if(!fs::exists(filename))
+            {
+                RUNTIME_ERROR("Attempt to open resource {} which does not exist", filename.string());
+            }
+
+            auto stream = text ? ifstream(filename) : ifstream(filename, ios::binary);
+            auto size = get_content_size(name);
+
+            auto buffer = new char[size + re_size];
+
+            stream.read(buffer + re_size, size);
+
+            auto resource = loader(*_owner, name, buffer, size);
+
+            name_storage.emplace_back(name);
+            it = loaded_resources.insert({name_storage.back(), MOVE(resource)}).first;
+
+            if(shrink)
+            {
+                it->second.free_underlying_buffer();
+            }
+
+            auto sysclock = std::chrono::system_clock();
+            resource_time_of_load.insert({
+                name_storage.back(), std::chrono::duration_cast<std::chrono::milliseconds>(sysclock.now().time_since_epoch())});
+        }
+
+        return it->second;
+
+    }
+    catch(fs::filesystem_error &fs)
     {
-        auto filename = folder / name;
-        auto stream = text ? ifstream(filename) : ifstream(filename, ios::binary);
-
-        if(stream.bad())
-        {
-            RUNTIME_ERROR("Attempt to open resource which does not exist.");
-        }
-
-        auto size = fs::file_size(filename);
-        auto buffer = new char[size + re_size];
-
-        stream.read(buffer + re_size, size);
-
-        auto resource = loader(*_owner, name, buffer, size);
-
-        name_storage.emplace_back(name);
-        it = loaded_resources.insert({name_storage.back(), std::move(resource)}).first;
-
-        if(shrink)
-        {
-            it->second.free_underlying_buffer();
-        }
-
-        auto sysclock = std::chrono::system_clock();
-        resource_time_of_load[name_storage.back()] = std::chrono::duration_cast<std::chrono::milliseconds>(sysclock.now().time_since_epoch());
+        RUNTIME_ERROR(
+            "Attempt to open resource {} which does not exist. ([INTERNAL] {})", 
+            (folder / name).string(), 
+            fs.what());
     }
-
-    return it->second;
 }
 
-size_t dib::resources::ResourceFolder::get_content_size(std::string_view filename) const
+size_t dib::res::ResourceFolder::get_content_size(std::string_view filename) const
 {
-    return fs::file_size(folder / filename);
+    return fixed_file_size(folder / filename);
 }
 
-void dib::resources::ResourceFolder::copy_content_to_buffer(std::string_view filename, void *buffer, bool text) const
+void dib::res::ResourceFolder::copy_content_to_buffer(std::string_view filename, void *buffer, bool text) const
 {
     auto stream = text 
         ? ifstream(folder / filename) 
@@ -461,7 +494,7 @@ void dib::resources::ResourceFolder::copy_content_to_buffer(std::string_view fil
         RUNTIME_ERROR("Attempt to get the content of a resource which does not exist.");
     }
 
-    auto size = fs::file_size(filename);
+    auto size = get_content_size(filename);
     stream.read((char *) buffer, size);
 }
 
@@ -595,7 +628,7 @@ void ResourceInterface<::Shader>::unload(Resources &, ::Shader &instance)
 
 //* This code is preserved for later re-introduction *//
 /*
-void shaders::detail::process_shader(std::string &code, const fs::path &src, std::unordered_set<fs::path> &included)
+void shaders::rdetail::process_shader(std::string &code, const fs::path &src, std::unordered_set<fs::path> &included)
 {
 	size_t index = 0;
 	while (index = code.find("#include", index), index != std::string::npos)

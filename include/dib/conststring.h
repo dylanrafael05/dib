@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <string>
 #include <string_view>
+#include <meta>
 
 namespace dib::strings
 {
@@ -20,6 +21,12 @@ namespace dib::strings
             
             for(const char *it = ptr; *it != '\0'; it++)
                 length++;
+        }
+        
+        consteval explicit StringLiteral(std::string_view str)
+        {
+            ptr = str.data();
+            length = str.length();
         }
 
         constexpr StringLiteral()
@@ -50,10 +57,18 @@ namespace dib::strings
     struct StringConst
     {
         char text[N];
+
         constexpr StringConst(const char (&text)[N])
         {
             for(size_t i = 0; i < N; i++)
                 this->text[i] = text[i];
+        }
+        constexpr explicit StringConst(const char *text)
+        {
+            for(size_t i = 0; i < N - 1; i++)
+                this->text[i] = text[i];
+
+            this->text[N - 1] = 0;
         }
 
         consteval const char *c_str() const { return text; }
@@ -67,6 +82,20 @@ namespace dib::strings
         consteval auto begin() const { return text; }
         consteval auto end() const { return text + N; }
     };
+
+    constexpr auto strlen(const char *s) -> size_t
+    {
+        size_t i;
+        for(i = 0uz; s[i] != 0; i++);
+        return i;
+    }
+    
+    template<const char *str>
+    consteval auto make_const()
+    {
+        constexpr auto strtype = std::meta::substitute(^^StringConst, { std::meta::reflect_constant(strlen(str) + 1) });
+        return typename [: strtype :](str);
+    }
 
     template<StringConst str>
     struct StringType

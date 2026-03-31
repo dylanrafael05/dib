@@ -7,7 +7,7 @@
 namespace dib::plugins
 {
     template<class T>
-    concept IsPlugin = requires(dib::app::App &app, const T &value)
+    concept IsPlugin = requires(dib::App &app, const T &value)
     {
         {value.inject(app)} -> types::IsVoid;
         std::is_default_constructible_v<T>;

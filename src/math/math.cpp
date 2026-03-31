@@ -69,60 +69,6 @@ __DIBMATH_INTEGRAL_EXTERNS()
 __DIBMATH_BITWISE_EXTERNS()
 #undef __func
 
-// Comparison operator definitions //
-#define __func(T, N, ...) \
-    template bool dib::math::operator==(vec<T, N>, vec<T, N>); \
-    template bool dib::math::operator!=(vec<T, N>, vec<T, N>);
-
-__DIBMATH_ALL_EXTERNS()
-#undef __func
-
-// Unary operator definitions //
-#define __func(T, N, ...) \
-    template vec<T, N> dib::math::operator+(vec<T, N>); \
-    template vec<T, N> dib::math::operator-(vec<T, N>);
-
-__DIBMATH_SCALAR_EXTERNS()
-#undef __func
-
-#define __func(T, N, ...) template vec<T, N> dib::math::operator~(vec<T, N>);
-    __DIBMATH_INTEGRAL_EXTERNS()
-#undef __func
-
-#define __func(T, N, ...) template vec<T, N> dib::math::operator!(vec<T, N>);
-    __DIBMATH_BOOL_EXTERNS()
-#undef __func
-
-// Vector operations //
-#define __func(T, N, ...) \
-    template T dib::math::dot(vec<T, N>, vec<T, N>); \
-    template float dib::math::length_sq(vec<T, N>); \
-    template float dib::math::length(vec<T, N>);
-
-__DIBMATH_SCALAR_EXTERNS()
-#undef __func
-
-#define __func(T, N, ...) \
-    template vec<T, N> dib::math::normalize(vec<T, N>); \
-    template void dib::math::normalize_inplace(vec<T, N>&);
-
-__DIBMATH_REAL_EXTERNS()
-#undef __func
-
-// Min, max, clamp //
-#define __func(T, N, ...) \
-    template vec<T, N> dib::math::max(vec<T, N>, vec<T, N>); \
-    template vec<T, N> dib::math::min(vec<T, N>, vec<T, N>); \
-    template vec<T, N> dib::math::clamp(vec<T, N>, vec<T, N>, vec<T, N>);
-
-__DIBMATH_SCALAR_EXTERNS()
-#undef __func
-
-// Lerp //
-#define __func(T, N, ...) template vec<T, N> dib::math::lerp(vec<T, N>, vec<T, N>, float);
-    __DIBMATH_REAL_EXTERNS()
-#undef __func
-
 // Miscelanneous functions //
 float dib::math::noise::permute(float x)
 {

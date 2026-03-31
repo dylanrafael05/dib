@@ -1,17 +1,24 @@
 #pragma once
 
+#include <compare>
 #include <concepts>
+#include <list>
+#include <map>
+#include <set>
+#include <string_view>
 #include <type_traits>
 #include <cstddef>
 #include <cstring>
+#include <typeindex>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <array>
 #include <string>
 #include <memory>
-#include <unordered_map>
-#include <unordered_set>
 
 #include "dib/preprocess.h"
+#include "dib/nameof.h"
 
 namespace dib
 {
@@ -42,7 +49,7 @@ namespace dib
 	/// Check if two references refer to the same memory location
 	constexpr bool ref_equal(auto &&a, auto &&b)
 	{
-		return ((char *)(void *)&a) == ((char *)(void *)&b);
+		return (uintptr_t)std::addressof(a) == (uintptr_t)std::addressof(b);
 	}
 }
 
@@ -78,6 +85,10 @@ namespace dib::types
 	concept IsSized = !IsZST<T>;
 	template<class T>
 	concept IsEnum = std::is_enum_v<T>;
+	template<class T>
+	concept IsValue = !std::is_reference_v<T>;
+	template<class T>
+	concept IsPointer = std::is_pointer_v<T>;
 
 	template<class T, class Base>
 	concept NotDerivedFrom = !IsDerivedFrom<T, Base>;
@@ -93,6 +104,15 @@ namespace dib::types
 	concept NotVoid = !IsVoid<T>;
 	template<class T>
 	concept NotEnum = !IsEnum<T>;
+	template<class T>
+	concept NotValue = !IsValue<T>;
+	template<class T>
+	concept NotPointer = !IsPointer<T>;
+	
+	template<class T>
+	concept Always = true;
+	template<class T>
+	concept Never = false;
 
 	/// Custom metaclasses
 
@@ -140,10 +160,10 @@ namespace dib::types
 
 	/// A type that provides the std::hash functionality via a member .get_hash()
 	/// should inherit this type.
-	struct HashProvided : Marker<HashProvided> {};
+	struct [[deprecated("Reflection supercedes use of this type")]] HashProvided : Marker<HashProvided> {};
 
 	template<class T>
-	concept IsHashProvided = IsDerivedFrom<T, HashProvided> && requires(const T &t) 
+	concept IsHashProvided [[deprecated("Reflection supercedes use of this type")]] = IsDerivedFrom<T, HashProvided> && requires(const T &t) 
 	{ 
 		{ t.get_hash() } -> IsSameAs<size_t>; 
 	};
@@ -153,6 +173,8 @@ namespace dib::types
 	/// this is typically the case of all types, except if an associated 
 	/// heap-bound object points to the object being moved (as in some 
 	/// implementations of std::list<>).
+
+	// TODO; reimplement via annotation
 	struct TriviallyRelocatable : Marker<TriviallyRelocatable> {};
 
 	template<bool> struct TriviallyRelocatableIf : TriviallyRelocatable {};
@@ -175,32 +197,106 @@ namespace dib::types
 	constexpr bool is_relocatable = is_trivially_relocatable<T> || std::is_move_constructible_v<T>;
 	template<class T>
 	concept IsRelocatable = is_relocatable<T>;
+
+	/// Annoyingly, standard containers dont hide operators that dont compile, nor can we check
+	/// automatically if the functions will compile. So we need to include all of their headers
+	/// and nuke our compile time to detect them.
+
+	template<class T>
+	struct IsEqualityComparableType : std::bool_constant<std::equality_comparable<T>> {};
+	template<class ...T>
+	struct IsEqualityComparableType<std::tuple<T...>> : std::bool_constant<(IsEqualityComparableType<T>::value && ...)> {};
+	template<class ...T>
+	struct IsEqualityComparableType<std::pair<T...>> : std::bool_constant<(IsEqualityComparableType<T>::value && ...)> {};
+	template<class ...T>
+	struct IsEqualityComparableType<std::vector<T...>> : std::bool_constant<(IsEqualityComparableType<T>::value && ...)> {};
+	template<class ...T>
+	struct IsEqualityComparableType<std::list<T...>> : std::bool_constant<(IsEqualityComparableType<T>::value && ...)> {};
+	template<class T, class E, class A>
+	struct IsEqualityComparableType<std::set<T, E, A>> : std::bool_constant<(IsEqualityComparableType<T>::value && IsEqualityComparableType<A>::value)> {};
+	template<class K, class V, class E, class A>
+	struct IsEqualityComparableType<std::map<K, V, E, A>> : std::bool_constant<(IsEqualityComparableType<K>::value && IsEqualityComparableType<V>::value && IsEqualityComparableType<A>::value)> {};
+	template<class K, class H, class E, class A>
+	struct IsEqualityComparableType<std::unordered_set<K, H, E, A>> : std::bool_constant<(IsEqualityComparableType<K>::value && IsEqualityComparableType<A>::value)> {};
+	template<class K, class V, class H, class E, class A>
+	struct IsEqualityComparableType<std::unordered_map<K, V, H, E, A>> : std::bool_constant<(IsEqualityComparableType<K>::value && IsEqualityComparableType<V>::value && IsEqualityComparableType<A>::value)> {};
+	template<class T>
+	concept IsEqualityComparable = IsEqualityComparableType<T>::value;
+	
+	template<class T>
+	struct IsThreeWayComparableType : std::bool_constant<std::three_way_comparable<T>> {};
+	template<class ...T>
+	struct IsThreeWayComparableType<std::tuple<T...>> : std::bool_constant<(IsThreeWayComparableType<T>::value && ...)> {};
+	template<class ...T>
+	struct IsThreeWayComparableType<std::pair<T...>> : std::bool_constant<(IsThreeWayComparableType<T>::value && ...)> {};
+	template<class ...T>
+	struct IsThreeWayComparableType<std::vector<T...>> : std::bool_constant<(IsThreeWayComparableType<T>::value && ...)> {};
+	template<class ...T>
+	struct IsThreeWayComparableType<std::list<T...>> : std::bool_constant<(IsThreeWayComparableType<T>::value && ...)> {};
+	template<class T, class E, class A>
+	struct IsThreeWayComparableType<std::set<T, E, A>> : std::bool_constant<(IsThreeWayComparableType<T>::value && IsThreeWayComparableType<A>::value)> {};
+	template<class K, class V, class E, class A>
+	struct IsThreeWayComparableType<std::map<K, V, E, A>> : std::bool_constant<(IsThreeWayComparableType<K>::value && IsThreeWayComparableType<V>::value && IsThreeWayComparableType<A>::value)> {};
+	template<class K, class H, class E, class A>
+	struct IsThreeWayComparableType<std::unordered_set<K, H, E, A>> : std::bool_constant<(IsThreeWayComparableType<K>::value && IsThreeWayComparableType<A>::value)> {};
+	template<class K, class V, class H, class E, class A>
+	struct IsThreeWayComparableType<std::unordered_map<K, V, H, E, A>> : std::bool_constant<(IsThreeWayComparableType<K>::value && IsThreeWayComparableType<V>::value && IsThreeWayComparableType<A>::value)> {};
+	template<class T>
+	concept IsThreeWayComparable = IsThreeWayComparableType<T>::value;
+
+	template<class T>
+	concept IsHashable = requires(const T &value)
+	{
+		{ std::hash<std::remove_cvref_t<T>>{}(value) } -> IsSameAs<size_t>;
+	};
 }
 
 namespace dib
 {
 	/// Produce a hash for multiple objects.
-	size_t get_hash(auto &&...obj) requires (sizeof...(obj) != 0)
+	constexpr size_t get_hash(auto &&...obj) requires (sizeof...(obj) != 0)
 	{
 		size_t hash_salt = 43;
-		return ((std::hash<std::remove_cvref_t<decltype(obj)>>{}(obj) + (hash_salt += 71, hash_salt *= 23)) ^ ...);
+		size_t result = 0;
+
+		([&]{
+			result ^= std::hash<std::remove_cvref_t<decltype(obj)>>{}(obj) ^ hash_salt;
+			hash_salt += 71;
+			hash_salt *= 23;
+		}(), ...);
+
+		return result;
 	}
 
 	/// Relocate an object from a source to an uninitialized destination;
 	/// equivalent to a memmove when type is relocatable, otherwise the same as a move construction
 	template<class T>
-	T *uninitialized_relocate(T *source, T *dest)
+	constexpr T *uninitialized_relocate(T *source, T *dest)
 	{
-		if constexpr (types::is_trivially_relocatable<T>)
+		if !consteval
 		{
-			#ifdef __GNUC__
-			#pragma GCC diagnostic push
-			#pragma GCC diagnostic ignored "-Wclass-memaccess"
-			#endif
-			std::memmove(dest, source, sizeof(T));
-			#ifdef __GNUC__
-			#pragma GCC diagnostic pop
-			#endif
+			if constexpr (types::is_trivially_relocatable<T>)
+			{
+				#ifdef DIBCOMPILER_gcc
+				#pragma GCC diagnostic push
+				#pragma GCC diagnostic ignored "-Wclass-memaccess"
+				#endif
+
+				#ifdef DIBCOMPILER_clang
+				#pragma GCC diagnostic push
+				#pragma GCC diagnostic ignored "-Wnontrivial-memcall"
+				#endif
+
+				std::memmove(dest, source, sizeof(T));
+
+				#if defined(DIBCOMPILER_gcc) || defined(DIBCOMPILER_clang)
+				#pragma GCC diagnostic pop
+				#endif
+			}
+			else
+			{
+				std::construct_at(dest, std::move(*source));
+			}
 		}
 		else
 		{
@@ -213,18 +309,32 @@ namespace dib
 	/// Relocate an array of objects from a source to an uninitialized destination;
 	/// equivalent to a memmove when type is relocatable, otherwise the same as std::uninitialized_move_n
 	template<class T>
-	T *uninitialized_relocate_n(T *source, size_t n, T *dest)
+	constexpr T *uninitialized_relocate_n(T *source, size_t n, T *dest)
 	{
-		if constexpr (types::is_trivially_relocatable<T>)
+		if !consteval
 		{
-			#ifdef __GNUC__
-			#pragma GCC diagnostic push
-			#pragma GCC diagnostic ignored "-Wclass-memaccess"
-			#endif
-			std::memmove(dest, source, sizeof(T) * n);
-			#ifdef __GNUC__
-			#pragma GCC diagnostic pop
-			#endif
+			if constexpr (types::is_trivially_relocatable<T>)
+			{
+				#ifdef DIBCOMPILER_gcc
+				#pragma GCC diagnostic push
+				#pragma GCC diagnostic ignored "-Wclass-memaccess"
+				#endif
+				
+				#ifdef DIBCOMPILER_clang
+				#pragma GCC diagnostic push
+				#pragma GCC diagnostic ignored "-Wnontrivial-memcall"
+				#endif
+				
+				std::memmove(dest, source, sizeof(T) * n);
+				
+				#if defined(DIBCOMPILER_gcc) || defined(DIBCOMPILER_clang)
+				#pragma GCC diagnostic pop
+				#endif
+			}
+			else
+			{
+				std::uninitialized_move_n(source, n, dest);
+			}
 		}
 		else
 		{
@@ -236,7 +346,7 @@ namespace dib
 
 	/// Relocate an object from a source to an initialized destination
 	template<class T>
-	T *relocate(T *source, T *dest)
+	constexpr T *relocate(T *source, T *dest)
 	{
 		std::destroy_at(dest);
 		uninitialized_relocate(source, dest);
@@ -247,7 +357,7 @@ namespace dib
 	/// Relocate an array of objects from a source to an initialized destination,
 	/// where the source and destination do not overlap
 	template<class T>
-	T *nonoverlapping_relocate_n(T *source, size_t n, T *dest)
+	constexpr T *nonoverlapping_relocate_n(T *source, size_t n, T *dest)
 	{
 		// Group relocation //
 		std::destroy_n(dest, n);
@@ -258,7 +368,7 @@ namespace dib
 
 	/// Relocate an array of objects from a source to an initialized destination
 	template<class T>
-	T *relocate_n(T *source, size_t n, T *dest)
+	constexpr T *relocate_n(T *source, size_t n, T *dest)
 	{
 		auto diff = source - dest;
 
@@ -304,191 +414,47 @@ namespace dib
 
 namespace dib::types
 {
+	namespace detail
+	{
+		static inline void trivial_fn(void *) {}
+	}
+	
+	template<class T>
+	constexpr size_t sizeof_ = []
+	{
+		if constexpr (std::is_function_v<T>) return 0;
+		else if constexpr (std::is_void_v<T>) return 1;
+		else return sizeof(T);
+	}();
+	
+	template<class T>
+	constexpr size_t alignof_ = []
+	{
+		if constexpr (std::is_function_v<T>) return 1;
+		else if constexpr (std::is_void_v<T>) return 1;
+		else return alignof(T);
+	}();
+
 	/// Get the true size of a type, which can be zero if it is void or empty
 	template<class T>
 	constexpr size_t packed_sizeof = []
 	{
 		if constexpr (std::is_void_v<T>) return 0;
 		else if constexpr (std::is_empty_v<T>) return 0;
+		else if constexpr (std::is_function_v<T>) return 0;
 		else return sizeof(T);
 	}();
-
-	/// A description of a type's memory layout, as well as a set of methods
-	/// for manipulating that type in memory (i.e. constructors and destructors).
-	/// There should only ever be one instance of this type for any given type,
-	/// which is provided through dib::types::TypeDescriptor::of<> or dib::types::typedesc<>
-	class TypeDescriptor : public HashProvided
-	{
-		struct VTable
-		{
-			void (*_destruct)(void *) = nullptr;
-			void (*_default_construct)(void *) = nullptr;
-			void (*_relocate)(void *src, void *dest) = nullptr;
-			void (*_move_construct)(void *src, void *dest) = nullptr;
-			void (*_copy_construct)(void *src, void *dest) = nullptr;
-			void (*_swap)(void *src, void *dest) = nullptr;
-
-			const std::type_info *_type = nullptr;
-			size_t _size = 0;
-			size_t _packed_size = 0;
-			size_t _align = 0;
-
-			struct
-			{
-				bool _polymorphic : 1 = false;
-				bool _trivial : 1 = false;
-				bool _trivial_copy : 1 = false;
-				bool _trivial_dest : 1 = false;
-				bool _trivial_move : 1 = false;
-				bool _trivial_rel : 1 = false;
-			};
-
-			template<class T>
-			consteval static VTable generate_for_type()
-			{
-				VTable desc;
-
-				if constexpr (std::is_trivially_destructible_v<T>)
-				{
-					desc._destruct = [](void *) {};
-				}
-				else
-				{
-					desc._destruct = [](void *value) { reinterpret_cast<T *>(value)->~T(); };
-				}
-
-				if constexpr (std::is_default_constructible_v<T>)
-				{
-					desc._default_construct = [](void *src)
-					{
-						new(src) T();
-					};
-				}
-
-				if constexpr (std::is_move_constructible_v<T>)
-				{
-					desc._move_construct = [](void *src, void *dest)
-					{
-						new(dest) T(reinterpret_cast<T &&>(*reinterpret_cast<T *>(src)));
-					};
-				}
-
-				if constexpr (std::is_copy_constructible_v<T>)
-				{
-					desc._copy_construct = [](void *src, void *dest)
-					{
-						new(dest) T(reinterpret_cast<T &>(*reinterpret_cast<T *>(src)));
-					};
-				}
-
-				if constexpr (is_relocatable<T>)
-				{
-					desc._relocate = [](void *src, void *dest)
-					{
-						dib::uninitialized_relocate((T *)src, (T *)dest);
-					};
-				}
-
-				if constexpr (std::is_swappable_v<T>)
-				{
-					desc._swap = [](void *src, void *dest)
-					{
-						std::swap(*(T *)src, *(T *)dest);
-					};
-				}
-
-				desc._type = &typeid(T);
-				desc._size = sizeof(T);
-				desc._packed_size = packed_sizeof<T>;
-				desc._align = alignof(T);
-
-				desc._polymorphic = std::is_polymorphic_v<T>;
-				desc._trivial = std::is_trivial_v<T>;
-				desc._trivial_copy = std::is_trivially_copyable_v<T>;
-				desc._trivial_dest = std::is_trivially_destructible_v<T>;
-				desc._trivial_move = std::is_trivially_move_constructible_v<T>;
-				desc._trivial_rel = dib::types::is_trivially_relocatable<T>;
-
-				return desc;
-			}
-		};
-
-		template<class T> 
-		static constexpr VTable vtable_of = VTable::generate_for_type<T>();
-
-		const VTable *_vt;
-
-		constexpr TypeDescriptor(const VTable *_vt) : _vt(_vt) {}
-
-	public:
-		constexpr TypeDescriptor() : _vt(nullptr) {}
-
-		bool can_relocate() const;
-		bool can_default() const;
-		bool can_move() const;
-		bool can_copy() const;
-		bool can_swap() const;
-
-		const std::type_info &type_info() const { return *_vt->_type; }
-		const char *name() const { return _vt->_type->name(); }
-
-		size_t size() const { return _vt->_size; }
-		size_t packed_size() const { return _vt->_packed_size; }
-		size_t align() const { return _vt->_align; }
-
-		bool is_polymorphic() const { return _vt->_polymorphic; }
-		bool is_trivial() const { return _vt->_trivial; }
-		bool is_trivially_copyable() const { return _vt->_trivial_copy; }
-		bool is_trivially_movable() const { return _vt->_trivial_move; }
-		bool is_trivially_relocatable() const { return _vt->_trivial_rel; }
-		bool is_trivially_destructable() const { return _vt->_trivial_dest; }
-
-		void destruct(void *dest) const;
-
-		void uninitialized_default_construct(void *dest) const;
-		void uninitialized_move_construct(void *src, void *dest) const;
-		void uninitialized_copy_construct(void *src, void *dest) const;
-		void uninitialized_relocate(void *src, void *dest) const;
-
-		void default_construct(void *dest) const;
-		void move_construct(void *src, void *dest) const;
-		void copy_construct(void *src, void *dest) const;
-		void relocate(void *src, void *dest) const;
-
-		void swap(void *src, void *dest) const;
-
-		template<class T>
-		consteval static TypeDescriptor of() { return { &vtable_of<T> }; }
-
-		size_t get_hash() const { return dib::get_hash(_vt); }
-
-		bool operator==(const TypeDescriptor &other) const = default;
-	};
-
-	/// Get the type descriptor for a provided type.
-	template<class T>
-	constexpr TypeDescriptor typedesc = TypeDescriptor::of<T>();
 }
 
-/// Inject the implementation of std::hash for all subclasses of HashProvided
-template<dib::types::IsHashProvided Hashable>
-struct std::hash<Hashable>
-{
-	size_t operator()(const Hashable &hashable) const
-	{
-		return hashable.get_hash();
-	}
-};
-
 /// General implementation of std::hash for enumeration types
-template<dib::types::IsEnum Enum>
-struct std::hash<Enum>
-{
-	size_t operator()(const Enum &e) const
-	{
-		return dib::get_hash(static_cast<std::underlying_type_t<Enum>>(e));
-	}
-};
+// template<dib::types::IsEnum Enum>
+// struct std::hash<Enum>
+// {
+// 	size_t operator()(const Enum &e) const
+// 	{
+// 		return dib::get_hash(static_cast<std::underlying_type_t<Enum>>(e));
+// 	}
+// };
 
 /// Trivially relocatable standard library types
 #define DIB_INJECT_TYPE_TRIVIALLY_RELOCATABLE(...) \

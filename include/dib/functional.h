@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <functional>
 #include <type_traits>
 
@@ -8,26 +9,10 @@
 #include "dib/debug.h"
 #include "dib/types.h"
 #include "dib/vector.h"
+#include "dib/fn.h"
 
 namespace dib::functional
 {
-    /// Helper alias for function pointers
-    namespace detail
-    {
-        template<class>
-        struct FnPtrHelper
-        {};
-
-        template<class R, class... A>
-        struct FnPtrHelper<R(A...)>
-        {
-            using type = R(*)(A...);
-        };
-    }
-    
-    template<class T>
-    using Fn = typename detail::FnPtrHelper<T>::type;
-
     /// A helper type which can be compared against, such that
     /// x == one_of(y, z) is the same as x == y || x == z
     template<class... T>
@@ -81,9 +66,9 @@ namespace dib::functional
     constexpr bool always_true = true;
 
     template<class F>
-    constexpr Fn<F> to_fn_ptr(std::convertible_to<Fn<F>> auto &&lmb)
+    constexpr fn<F> to_fn_ptr(std::convertible_to<fn<F>> auto &&lmb)
     {
-        return (Fn<F>)lmb;
+        return (fn<F>)lmb;
     }
     
     /// Implementation of the 'FunctionRef' class
@@ -97,19 +82,24 @@ namespace dib::functional
             void *env;
 
         public:
-            R operator()(Args ...args) const
+            constexpr R operator()(Args ...args) const
             {
                 return function(env, FORWARD(args)...);
             }
+
+            constexpr operator bool() const { return function; }
+
+            constexpr FunctionRef_Impl() : function(nullptr), env(nullptr) {}
+            constexpr FunctionRef_Impl(std::nullptr_t) : FunctionRef_Impl() {}
             
             template<class T, std::invocable<T *, Args...> Fn> requires (types::IsSameAs<std::invoke_result_t<Fn &&, T *, Args...>, R>)
-            FunctionRef_Impl(Fn &&function, T *env)
+            constexpr FunctionRef_Impl(Fn &&function, T *env)
                 : function((R(*)(void *, Args...))(void*)to_fn_ptr<R(T *, Args...)>(function))
                 , env(env)
             {}
 
             template<class Lambda>
-            FunctionRef_Impl(const Lambda &lambda)
+            constexpr FunctionRef_Impl(const Lambda &lambda)
                 : function([](void *env, Args ...args) -> R {
                     return (*(const Lambda *)(env))(FORWARD(args)...); })
                 , env((void*) &lambda)
@@ -177,7 +167,7 @@ namespace dib::functional
         // Store both the function pointer and heap-bound function impl
         union
         {
-            R (*_fn_ptr)(Args...);
+            FunctionRef<R(Args...)> _fn_ptr;
             detail::FunctionImpl<R, Args...> *_heap_ptr;
         };
         
@@ -233,6 +223,10 @@ namespace dib::functional
         Function(R (*ptr)(Args...))
             : _fn_ptr(ptr), _is_fn_ptr(true)
         {}
+        
+        Function(const FunctionRef<R(Args...)> &ptr)
+            : _fn_ptr(ptr), _is_fn_ptr(true)
+        {}
 
         template<dib::types::NotValueSame<Function<R(Args...)>> L>
         Function(L &&lambda)
@@ -274,7 +268,7 @@ namespace dib::functional
         {
             return _is_fn_ptr;
         }
-        constexpr R (*raw_ptr() const)(Args...)
+        constexpr auto raw_ptr() const
         {
             ASSERT(is_raw_ptr());
             return _fn_ptr;
@@ -284,11 +278,11 @@ namespace dib::functional
         /// moved from or contains a null pointer.
         constexpr bool empty() const
         {
-            return _fn_ptr == nullptr;
+            return !_fn_ptr;
         }
 
         /// Check that this instance is nonempty
-        constexpr operator bool() const {return _fn_ptr != nullptr;}
+        constexpr operator bool() const { return _fn_ptr; }
 
         /// Call the function represented by this instance.
         /// Throws if empty.
@@ -304,6 +298,11 @@ namespace dib::functional
             return _heap_ptr->operator()(FORWARD(args)...);
         }
     };
+
+    template<class R, class ...Args>
+    Function(R(*)(Args...)) -> Function<R(Args...)>;
+    template<class R, class ...Args>
+    Function(const FunctionRef<R(Args...)> &) -> Function<R(Args...)>;
 
     template<class MergeOperator, class R, class... Args>
     class BasicMultifunction

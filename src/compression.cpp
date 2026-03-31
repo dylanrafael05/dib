@@ -8,9 +8,9 @@
 #include <execution>
 #include <unordered_map>
 #include <memory>
-#include <numeric>
 #include <bit>
-#include <iostream>
+#include <vector>
+#include <atomic>
 
 using namespace dib::compression;
 
@@ -185,7 +185,7 @@ Buffer dib::compression::compress_f(const Buffer buf)
 	key.total_size = buf.size;
 
 	// Calculate counts //
-	std::for_each(std::execution::par_unseq, buf.begin(), buf.end(), [&](uint8_t byte)
+	std::for_each(buf.begin(), buf.end(), [&](uint8_t byte)
 	{
 		key.counts[byte]++;
 	});
@@ -331,7 +331,7 @@ Buffer dib::compression::compress(const Buffer buf)
 	key.total_size = buf.size;
 
 	// Calculate counts //
-	std::for_each(std::execution::par_unseq, buf.begin(), buf.end(), [&](uint8_t byte)
+	std::for_each(buf.begin(), buf.end(), [&](uint8_t byte)
 	{
 		key.counts[byte]++;
 	});

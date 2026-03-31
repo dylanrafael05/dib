@@ -5,7 +5,7 @@
 #include "dib/conststring.h"
 #include "dib/resources.h"
 #include "dib/plugins/concept.h"
-#include "dib/ecs/components.h"
+#include "dib/ecs/entities.h"
 #include "dib/ecs/singletons.h"
 #include "dib/ecs/state_machine.h"
 #include "dib/ecs/world.h"
@@ -17,22 +17,25 @@
 
 #define __file_line_col __FILE__, __LINE__
 #define __on_app_load \
-    void __on_app_load__(::dib::app::UniqueIdentifier<__file_line_col>); \
-    template<> const char ::dib::app::UniqueIdentifier<__file_line_col>::value = []{ \
-        __on_app_load__(::dib::app::UniqueIdentifier<__file_line_col>{}); \
+    void __on_app_load__(::dib::detail::UniqueIdentifier<__file_line_col>); \
+    template<> const char ::dib::detail::UniqueIdentifier<__file_line_col>::value = []{ \
+        __on_app_load__(::dib::detail::UniqueIdentifier<__file_line_col>{}); \
         return 0; \
     }(); \
-    void __on_app_load__(::dib::app::UniqueIdentifier<__file_line_col>)
+    void __on_app_load__(::dib::detail::UniqueIdentifier<__file_line_col>)
 
 #define on_app_load __dibapp_eval(__on_app_load)
 
-namespace dib::app
+namespace dib
 {
-    template<dib::strings::StringConst, uint_least32_t>
-    struct UniqueIdentifier
+    namespace detail
     {
-        static const char value;
-    };
+        template<dib::strings::StringConst, uint_least32_t>
+        struct UniqueIdentifier
+        {
+            static const char value;
+        };
+    }
 
 #ifdef DIBAPP_BATCH
     constexpr bool use_batch = true;
@@ -42,7 +45,7 @@ namespace dib::app
 
     namespace detail
     {
-        std::unique_ptr<dib::resources::ResourceStore> get_resource_manager(bool use_batch);
+        std::unique_ptr<dib::res::ResourceStore> get_resource_manager(bool use_batch);
     }
     
     App &this_app();
@@ -69,7 +72,7 @@ namespace dib::app
             world().resources().set_store(detail::get_resource_manager(use_batch));
         }
 
-        friend App &dib::app::this_app();
+        friend App &dib::this_app();
 
     public:
         ecs::Systems &systems() { return _sys_scheduler; }
@@ -88,27 +91,29 @@ namespace dib::app
         const ecs::StateMachine &state_machine() const { return _world.state_machine(); }
         ecs::Commands &commands() { return _world.commands(); }
         const ecs::Commands &commands() const { return _world.commands(); }
-        resources::Resources &resources() { return _world.resources(); }
-        const resources::Resources &resources() const { return _world.resources(); }
+        res::Resources &resources() { return _world.resources(); }
+        const res::Resources &resources() const { return _world.resources(); }
 
         App &set_fps(float target_fps);
         App &set_title(const std::string &title);
         App &set_dimensions(int width, int height);
         App &initialize(int argc, const char *const *argv);
 
-        template<dib::plugins::IsPlugin Plugin>
-        App &inject(Plugin &&plug)
+        App &inject(dib::plugins::IsPlugin auto &&plug)
         {
             plug.inject(*this);
             return *this;
         }
 
-        template<dib::plugins::IsPlugin Plugin>
-        App &inject()
-        {
-            return inject(Plugin());
-        }
+		App &add_system(ecs::System &&sys);
+		App &add_systems(const std::initializer_list<ecs::System> &systems);
 
         void run();
     };
+
+    template<class T>
+    inline T &get_singleton() { return singletons().get<T>(); }
+
+    template<ecs::NotComponentPack... T>
+    inline ecs::Query<T...> query() { return entities().query<T...>(); }
 }

@@ -5,14 +5,15 @@
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wenum-compare"
+#pragma GCC diagnostic ignored "-Wenum-enum-conversion"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 #pragma GCC diagnostic pop
 
 using namespace dib;
-using namespace dib::app;
-using namespace dib::resources;
+using namespace dib::res;
 
 App &App::set_fps(float target_fps)
 {
@@ -40,31 +41,34 @@ App &App::initialize(int argc, const char *const *argv)
 App::~App()
 {
     if (!_running) return;
-
-    // Perform cleanup //
-    CloseWindow();
 }
 
 void App::run()
 {
-    std::cout << "Running dibapp!" << std::endl;
-
     this->_running = true;
     init_resource_manager();
     systems().build();
 
-    InitWindow(window_width, window_height, title.c_str());
-    SetTargetFPS(target_fps);
-
     // Inject our custom resource management into raylib
-    SetLoadFileDataCallback(resources::detail::file_load_data_callback);
-    SetLoadFileTextCallback(resources::detail::file_load_text_callback);
+    SetLoadFileDataCallback(res::detail::file_load_data_callback);
+    SetLoadFileTextCallback(res::detail::file_load_text_callback);
 
-    // Build and execute initializer systems //
+    // Initialize raylib
+    SetTargetFPS(target_fps);
+    SetTraceLogLevel(LOG_ALL);
+    InitWindow(window_width, window_height, title.c_str());
+    SetTraceLogLevel(LOG_INFO);
+
+    if(!IsWindowReady())
+    {
+        RUNTIME_ERROR("You're not ready for this.");
+    }
+
+    // Execute initializer systems
     systems().execute(world(), ecs::groups::OnInit);
     systems().execute(world(), ecs::groups::Start);
 
-    // Execute main loop //
+    // Execute main loop
     while (!WindowShouldClose())
     {
         systems().execute(world(), ecs::groups::Main);
@@ -72,15 +76,18 @@ void App::run()
 
     // Build and execute cleanup systems //
     systems().execute(world(), ecs::groups::OnDeinit);
+    
+    // Perform cleanup //
+    CloseWindow();
 }
 
-App &dib::app::this_app()
+App &dib::this_app()
 {
     static App app;
     return app;
 }
 
-std::unique_ptr<ResourceStore> dib::app::detail::get_resource_manager(bool use_batch)
+std::unique_ptr<ResourceStore> dib::detail::get_resource_manager(bool use_batch)
 {
     if (use_batch)
     {
@@ -91,7 +98,27 @@ std::unique_ptr<ResourceStore> dib::app::detail::get_resource_manager(bool use_b
     }
     else
     {
-        auto ret = new ResourceFolder(env::executable_directory_path() / ".." / "resources");
+        auto ret = new ResourceFolder(env::executable_directory_path() / "resources");
         return std::unique_ptr<ResourceStore>(ret);
     }
 }
+
+App &dib::App::add_system(ecs::System &&sys) 
+{ 
+    this->systems().add(MOVE(sys));
+    return *this;
+}
+
+App &dib::App::add_systems(const std::initializer_list<ecs::System> &systems)
+{ 
+    this->systems().add(systems);
+    return *this;
+}
+
+ecs::Systems &dib::systems() { return this_app().systems(); }
+ecs::Singletons &dib::singletons() { return this_app().singletons(); }
+ecs::Commands &dib::commands() { return this_app().commands(); }
+ecs::Entities &dib::entities() { return this_app().entities(); }
+ecs::StateMachine &dib::state_machine() { return this_app().state_machine(); }
+ecs::Messages &dib::messages() { return this_app().messages(); }
+res::Resources &dib::resources() { return this_app().resources(); }
