@@ -1,14 +1,18 @@
 #pragma once 
 
 #include <cstddef>
+#include <new>
+#include <span>
 #include <stdint.h>
 #include <stddef.h>
 #include <algorithm>
 #include <memory>
 
+#include "dib/math/vec.h"
 #include "dib/types.h"
 #include "dib/debug.h"
 #include "dib/algorithm.h"
+#include "dib/json.attr.h"
 
 namespace dib::structures
 {
@@ -16,12 +20,12 @@ namespace dib::structures
 	class Vector;
 
 	template<class T>
-	class DArray
+	class DynArray : public types::TriviallyRelocatable
 	{
 		T *_data;
 		size_t _size;
 
-		void move(DArray &&other)
+		void move(DynArray &&other)
 		{
 			_data = other._data;
 			_size = other._size;
@@ -30,7 +34,7 @@ namespace dib::structures
 			other._size = 0;
 		}
 
-		void copy(const DArray &other)
+		void copy(const DynArray &other)
 		{
 			_data = new T[other._size];
 			_size = other._size;
@@ -44,16 +48,17 @@ namespace dib::structures
 		}
 
 	public:
+		using value_type = T;
 		using size_type = size_t;
-		using iterator = algorithm::BasicRandomAccessIterator<DArray<T>>;
-		using const_iterator = algorithm::BasicRandomAccessIterator<const DArray<T>>;
+		using iterator = algorithm::BasicRandomAccessIterator<DynArray<T>>;
+		using const_iterator = algorithm::BasicRandomAccessIterator<const DynArray<T>>;
 
-		DArray() : _data(nullptr), _size(0) {}
-		DArray(size_t count) : _data(new T[count]), _size(count) {}
-		DArray(const DArray &other) { copy(other); }
-		DArray(DArray &&other) { move(MOVE(other)); }
+		DynArray() : _data(nullptr), _size(0) {}
+		DynArray(size_t count) : _data(new T[count]), _size(count) {}
+		DynArray(const DynArray &other) { copy(other); }
+		DynArray(DynArray &&other) { move(MOVE(other)); }
 
-		DArray &operator=(const DArray &other)
+		DynArray<T> &operator=(const DynArray<T> &other)
 		{
 			if(ref_equal(*this, other))
 				return *this;
@@ -63,7 +68,7 @@ namespace dib::structures
 			return *this;
 		}
 		
-		DArray &operator=(DArray &&other)
+		DynArray<T> &operator=(DynArray<T> &&other)
 		{
 			if(ref_equal(*this, other))
 				return *this;
@@ -72,6 +77,8 @@ namespace dib::structures
 			move(MOVE(other));
 			return *this;
 		}
+
+		~DynArray() { destroy(); }
 
 		T *data() { return _data; }
 		const T *data() const { return _data; }
@@ -89,13 +96,62 @@ namespace dib::structures
 
 		T &operator[](size_t n) { return *(begin() + n); }
 		const T &operator[](size_t n) const { return *(begin() + n); }
+
+		operator std::span<T>() 
+		{
+			return { _data, _size };
+		}
+		operator std::span<const T>() requires (!std::is_const_v<T>)
+		{
+			return { _data, _size };
+		}
 		
+	};
+
+	template<class T>
+	class [[=json::derive]] DynArray2D : public types::TriviallyRelocatable
+	{
+		[[=json::rename("arr")]] DynArray<T> _arr;
+		[[=json::rename("w")]] size_t _width;
+		[[=json::rename("h")]] size_t _height;
+
+	public:
+		DynArray2D() : _arr(), _width(0), _height(0) {}
+		DynArray2D(size_t width, size_t height) : _arr(width * height), _width(width), _height(height) {} 
+		DynArray2D(math::int2 size) : DynArray2D<T>(size.x, size.y) {} 
+
+		size_t width() const { return _width; }
+		size_t height() const { return _height; }
+		math::int2 sizes() const { return { (int)_width, (int)_height }; }
+		size_t size() const { return _arr.size(); }
+
+		std::span<T> flat() { return _arr; }
+		std::span<const T> flat() const { return _arr; }
+
+		bool is_within_bounds(math::int2 index) const
+		{
+			return (0 <= index.x && index.x < (int)_width)
+				&& (0 <= index.y && index.y < (int)_height);
+		}
+
+		T &operator[](math::int2 index) 
+		{
+			if(!is_within_bounds(index))
+				RUNTIME_ERROR("Index {},{} out of bounds for Array2D of size {},{}", index.x, index.y, sizes().x, sizes().y);
+
+			return _arr[index.x * _height + index.y];
+		}
+
+		T &operator[](int x, int y) { return operator[]({x, y}); }
+		const T &operator[](math::int2 index) const { return static_cast<DynArray2D<T>&>(*this)[index]; }
+		const T &operator[](int x, int y) const { return operator[]({x, y}); }
+
 	};
 
 	/// A vector which can store a specified capacity of elements,
 	/// and does so in-memory without allocation.
 	template<class T, size_t Cap>
-	class StaticVector : public types::TriviallyRelocatable
+	class StaticVector : public types::TriviallyRelocatableIf<types::is_trivially_relocatable<T>>
 	{
 		alignas(T) char _data[sizeof(T) * Cap];
 		size_t _size;
@@ -133,6 +189,7 @@ namespace dib::structures
 		friend class dib::structures::Vector;
 
 	public:
+		using value_type = T;
 		using size_type = size_t;
 		using iterator = algorithm::BasicRandomAccessIterator<StaticVector<T, Cap>>;
 		using const_iterator = algorithm::BasicRandomAccessIterator<const StaticVector<T, Cap>>;
@@ -220,6 +277,13 @@ namespace dib::structures
 			_size--;
 		}
 
+		void clear()
+		{
+			// Remove all //
+			std::destroy_n(_begin(), size());
+			_size = 0;
+		}
+
 		/// <summary>
 		/// Relocate elements from the provided contiguous array into this vector.
 		/// </summary>
@@ -231,7 +295,7 @@ namespace dib::structures
 
 			// Relocate elements (note that relocate_n isn't applicable here, since _size != n) //
 			std::destroy_n(_begin(), _size);
-			dib::uninitialized_relocate_n(_begin(), n, pointer);
+			dib::uninitialized_relocate_n(pointer, n, _begin());
 			
 			_size = n;
 		}
@@ -251,12 +315,12 @@ namespace dib::structures
 	/// for storage on the stack. By default, this amount is either one or as many as can fit
 	/// within the required space, whichever is larger.
 	template<class T, size_t Cap = std::max((size_t)1, 2 * sizeof(T*) / sizeof(T))>
-	class Vector : public types::TriviallyRelocatable
+	class Vector : public types::TriviallyRelocatableIf<types::is_trivially_relocatable<T>>
 	{
 		struct Heap
 		{
-			char *data; 
-			size_t size;
+			char *data = nullptr; 
+			size_t size = 0;
 		};
 
 		union
@@ -269,15 +333,17 @@ namespace dib::structures
 
 		bool is_static() const { return _capacity == Cap; }
 
+		constexpr static auto Align = std::align_val_t(alignof(T));
+
 		void switch_to_heap()
 		{
-			// TODO: handle alignment?
-			auto raw_data = new char[sizeof(T) * _capacity];
+			auto raw_data = new(Align) char[sizeof(T) * _capacity];
 			auto data = (T *)raw_data;
 
 			auto size = _static.size();
 
 			dib::uninitialized_relocate_n(_static._begin(), size, data);
+			std::construct_at(&_heap);
 			_heap.data = raw_data;
 			_heap.size = size;
 		}
@@ -290,7 +356,10 @@ namespace dib::structures
 			std::construct_at(&_static);
 			_static.relocate_from((T *)data, size);
 
-			delete[] data;
+			_capacity = Cap;
+
+			if(_heap.data)
+				::operator delete[](_heap.data, Align);
 		}
 
 		void reallocate_heap()
@@ -298,10 +367,12 @@ namespace dib::structures
 			auto old_raw_data = _heap.data;
 			auto old_data = (T *)old_raw_data;
 
-			_heap.data = new char[sizeof(T) * _capacity];
+			_heap.data = new(Align) char[sizeof(T) * _capacity];
 
 			dib::uninitialized_relocate_n(old_data, _heap.size, (T *)_heap.data);
-			delete[] old_data;
+		
+			if(old_raw_data)
+				::operator delete[](old_raw_data, Align);
 		}
 
 		void destroy() 
@@ -309,7 +380,11 @@ namespace dib::structures
 			if (!is_static() && _heap.data != nullptr)
 			{
 				std::destroy_n((T *)_heap.data, _heap.size);
-				delete[] _heap.data;
+				::operator delete[](_heap.data, Align);
+			}
+			else
+			{
+				std::destroy_at(&_static);
 			}
 		}
 
@@ -345,6 +420,7 @@ namespace dib::structures
 
 				other._heap.size = 0;
 				other._heap.data = nullptr;
+				other.switch_to_stack();
 			}
 		}
 
@@ -355,6 +431,7 @@ namespace dib::structures
 		const T *_end() const { return _begin() + size(); }
 
 	public:
+		using value_type = T;
 		using size_type = size_t;
 		using iterator = algorithm::BasicRandomAccessIterator<Vector<T>>;
 		using const_iterator = algorithm::BasicRandomAccessIterator<const Vector<T>>;
@@ -425,8 +502,7 @@ namespace dib::structures
 			if (is_static() && sz < Cap)
 			{
 				// Static vector can fit new element //
-				_static.emplace(_static.begin() + idx, FORWARD(args)...);
-				return *it;
+				return _static.emplace(_static.begin() + idx, FORWARD(args)...);
 			}
 
 			// NOTE: vector must be heap-based beyond this point! //
@@ -435,7 +511,7 @@ namespace dib::structures
 			{
 				auto is_static = this->is_static();
 				_capacity *= 2;
-
+				
 				if (is_static) switch_to_heap();
 				else reallocate_heap();
 			}
@@ -467,10 +543,29 @@ namespace dib::structures
 			// Shift elements to cover removed //
 			algorithm::array_erase(_begin() + cit.index(), _end());
 			_heap.size--;
+		}
 
-			// Revert to stack based if small enough //
-			if (_heap.size == Cap)
-				switch_to_stack();
+		void clear()
+		{
+			// If static, delegate //
+			if (is_static())
+			{
+				_static.clear();
+				return;
+			}
+
+			// Shift elements to cover removed //
+			std::destroy_n(_begin(), size());
+			_heap.size = 0;
+		}
+
+		void shrink_to_fit()
+		{
+			if(!is_static())
+			{
+				if(_capacity > Cap) reallocate_heap();
+				else switch_to_stack();
+			}
 		}
 
 		auto operator<=>(const Vector &other) const

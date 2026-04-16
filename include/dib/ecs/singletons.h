@@ -1,32 +1,34 @@
 #pragma once
 
 #include <unordered_map>
-#include <typeindex>
 
+#include "dib/metautils.h"
 #include "dib/raw_memory.h"
-#include "dib/option.h"
 #include "dib/debug.h"
 #include "dib/preprocess.h"
-#include "dib/types.h"
 
 namespace dib::ecs
 {
-    struct Singletons;
-    struct Messages;
+    class Singletons;
 }
 
 namespace dib
 {
     ecs::Singletons &singletons();
-    ecs::Messages &messages();
 }
 
 namespace dib::ecs
 {
+    class Singleton {};
+    constexpr Singleton singleton;
+
+    template<class T>
+    concept IsSingleton = AnnotatedWith<T, Singleton>;
+
 	class Singletons
 	{
     public:
-        template<class T, class... Args>
+        template<IsSingleton T, class... Args>
         Singletons &create(Args &&...args)
         {
             if (has<T>())
@@ -38,7 +40,7 @@ namespace dib::ecs
             return *this;
         }
 
-        template<class T, class... Args>
+        template<IsSingleton T, class... Args>
         T &get_new(Args&& ...args)
         {
             if (has<T>())
@@ -48,21 +50,21 @@ namespace dib::ecs
             return get<T>();
         }
 
-        template<class T>
+        template<IsSingleton T>
         T &get()
         {
             if (!has<T>())
             {
-                RUNTIME_ERROR("Attempt to get a singleton which does not exist.");
+                RUNTIME_ERROR("Attempt to get a singleton of type {} which does not exist.", refl::typeof<T>.name());
             }
 
             return singletons[refl::typeof<T>].template get<T>();
         }
 
-        template<class T>
+        template<IsSingleton T>
         bool has() const { return singletons.contains(refl::typeof<T>); }
 
-        template<class T>
+        template<IsSingleton T>
         void remove()
         {
             singletons.erase(refl::typeof<T>);
@@ -71,49 +73,4 @@ namespace dib::ecs
     private:
         std::unordered_map<refl::Type, dib::structures::ErasedSingleton> singletons;
 	};
-
-    class Messages
-    {
-    public:
-        template<class T>
-        void send(T &&message)
-        {
-            initialize_storage<T>();
-            messages.at(typeid(T)).emplace_back<T>(MOVE(message));
-        }
-
-        template<class T>
-        bool has()
-        {
-            return messages.contains(typeid(T)) && messages.at(typeid(T)).size() != 0;
-        }
-
-        template<class T>
-        dib::option::Option<T> get()
-        {
-            // Early exit for empty queue //
-            if (!messages.contains(typeid(T))) return dib::option::none;
-            auto &stack = messages.at(typeid(T));
-
-            // Early exit for empty queue //
-            if (stack.size() == 0) return dib::option::none;
-
-            T &element = stack.get<T>(stack.size() - 1);
-            T ret = MOVE(element);
-
-            stack.pop_back();
-
-            return { MOVE(ret) };
-        }
-
-    private:
-        template<class T>
-        void initialize_storage()
-        {
-            if (messages.contains(typeid(T))) [[likely]] return;
-            messages[typeid(T)] = dib::structures::ErasedVec::create<T>();
-        }
-
-        std::unordered_map<std::type_index, dib::structures::ErasedVec> messages;
-    };
 }

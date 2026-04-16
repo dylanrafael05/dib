@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -10,6 +11,8 @@
 #include <list>
 #include <typeindex>
 
+#include "dib/debug.h"
+#include "dib/ints.h"
 #include "dib/json.h"
 #include "dib/reflect.h"
 #include "dib/types.h"
@@ -86,6 +89,9 @@ namespace dib::res
             [[maybe_unused]] Resources &resources, 
             [[maybe_unused]] T &instance) 
         {}
+        static void get_dependencies(
+            [[maybe_unused]] std::vector<std::string> &deps)
+        {}
         static constexpr bool free_underlying_once_loaded = false;
 
         using disable = void;
@@ -100,7 +106,7 @@ namespace dib::res
 
         static constexpr bool free_underlying_once_loaded = []
         {
-            if constexpr(requires {{ResourceInterface<T>::free_underlying_once_loaded} -> std::same_as<bool>;})
+            if constexpr(requires {{ResourceInterface<T>::free_underlying_once_loaded} -> std::convertible_to<bool>;})
             {
                 return ResourceInterface<T>::free_underlying_once_loaded;
             }
@@ -112,7 +118,7 @@ namespace dib::res
 
         static constexpr bool open_as_text = []
         {
-            if constexpr (requires {{ResourceInterface<T>::open_as_text} -> std::same_as<bool>;})
+            if constexpr (requires {{ResourceInterface<T>::open_as_text} -> std::convertible_to<bool>;})
             {
                 return ResourceInterface<T>::open_as_text;
             }
@@ -137,6 +143,14 @@ namespace dib::res
                 ResourceInterface<T>::unload(resources, instance);
             }
         }
+        
+        static void get_dependencies(T &instance, std::vector<std::string> &deps)
+        {
+            if constexpr(requires {{ResourceInterface<T>::get_dependencies(instance, deps)} -> std::same_as<void>;})
+            {
+                ResourceInterface<T>::get_dependencies(instance, deps);
+            }
+        }
     };
 
     namespace detail
@@ -151,6 +165,7 @@ namespace dib::res
             size_t _re_size;
             char *_data;
             void (*_destructor)(Resources &, void *);
+            std::vector<std::string> _dependencies;
 
             void move_from(LoadedResource &&other);
             void destruct();
@@ -168,6 +183,7 @@ namespace dib::res
                 });
 
                 ResourceTraits<T>::load(owner, *(T*)buffer, filename, buffer + sizeof(T), file_size);
+                ResourceTraits<T>::get_dependencies(*(T*)buffer, out._dependencies);
                 return out;
             }
 
@@ -193,10 +209,10 @@ namespace dib::res
     /// depending on whether or not the resource storage system supports dynamic reloading
     /// of assets. Is also json serializable.
     template<class T>
-    class ResourceHandle : json::ProvidedJsonInterface
+    class [[=provides_hash]] ResourceHandle : public json::ProvidedJsonInterface
     {
         Resources *_owner;
-        std::string_view _name;
+        std::string _name;
         mutable const T *_cached;
 
         friend class dib::res::ResourceStore;
@@ -205,6 +221,9 @@ namespace dib::res
         ResourceHandle(Resources &owner, std::string_view name);
 
     public:
+        ResourceHandle() : _owner(nullptr), _name(""), _cached(nullptr) {}
+
+        bool is_valueless() const { return _owner == nullptr; }
 
         std::string_view name() const { return _name; }
 
@@ -217,15 +236,20 @@ namespace dib::res
         {
             js.val(
                 *this, 
-                [](std::string_view str) { 
+                [](std::string str) { 
                     return ResourceHandle<T>(
-                        detail::global_resource_store(), 
+                        resources(), 
                         //!WARNING! This undermines the idea of having multiple Resources instances!
                         str
                     ); 
                 },
                 [](const ResourceHandle<T> &handle) { return handle._name; }
             );
+        }
+
+        size_t get_hash() const 
+        {
+            return dib::get_hash(_name);
         }
     };
 
@@ -238,11 +262,13 @@ namespace dib::res
 
     protected:
         using Loader = detail::LoadedResource(*)(Resources &owner, std::string_view filename, char *buffer, size_t size);
+
         virtual const detail::LoadedResource &get_loaded(
             std::string_view name, Loader loader, size_t re_size, bool free_underlying_once_loaded, bool open_as_text) = 0;
-
-        Resources *_owner = nullptr;
         
+        virtual bool requires_reload(std::string_view name) = 0;
+        
+        Resources *_owner = nullptr;
         void set_owner(Resources &owner);
 
     public:
@@ -306,6 +332,9 @@ namespace dib::res
     template<class T>
     const T &ResourceHandle<T>::get() const
     {
+        if(is_valueless())
+            RUNTIME_ERROR("Attempt to read from valueluess resource handle.");
+
         if(_cached)
             return *_cached;
 
@@ -363,6 +392,7 @@ namespace dib::res
 
     protected:
         const detail::LoadedResource &get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) override;
+        bool requires_reload(std::string_view name) override;
 
     public:
         ResourceBatch() {}
@@ -377,13 +407,21 @@ namespace dib::res
 
     class ResourceFolder final : public ResourceStore
     {
+        struct TimeOfLoad
+        {
+            u64 frame_loaded;
+            u64 frame_last_checked;
+            std::chrono::milliseconds sys_time;
+        };
+
         std::list<std::string> name_storage;
         std::unordered_map<std::string_view, detail::LoadedResource> loaded_resources;
-        std::unordered_map<std::string_view, std::chrono::milliseconds> resource_time_of_load;
+        std::unordered_map<std::string_view, TimeOfLoad> resource_time_of_load;
         std::filesystem::path folder;
 
     protected:
         const detail::LoadedResource &get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text) override;
+        bool requires_reload(std::string_view name) override;
 
     public:
         ResourceFolder(std::filesystem::path folder)
@@ -416,12 +454,11 @@ namespace dib::res
 
     /// Helper resource class which is defined using a JSON,
     /// which is then deserialized upon loading.
-    template<class Self>
-    class JsonResource : json::ProvidedJsonInterface
-    {};
+    class JsonResource {};
+    constexpr JsonResource json_resource;
 
     template<class T>
-    concept IsJsonResource = types::IsDerivedFrom<T, JsonResource<T>>;
+    concept IsJsonResource = AnnotatedDirectlyWith<T, JsonResource>;
 
     // Default implementations of ResourceInterface //
     template<> struct ResourceInterface<Text>
@@ -439,8 +476,6 @@ namespace dib::res
     template<IsJsonResource T>
     struct ResourceInterface<T>
     {
-        static_assert(json::HasCustomInterface<T>, "JsonResources must correctly provide a json interface");
-
         static void load(Resources &, T &instance, std::string_view, const char *buffer, size_t)
         {
             std::stringstream buffer_stream(buffer);
@@ -485,14 +520,5 @@ namespace dib::res
     {
         static void load(Resources &resources, ::Model &instance, std::string_view filename, const char *buffer, size_t size);
         static void unload(Resources &resources, ::Model &instance);
-    };
-    
-    template<> struct ResourceInterface<::Shader>
-    {
-        static void load(Resources &resources, ::Shader &instance, std::string_view filename, const char *buffer, size_t size);
-        static void unload(Resources &resources, ::Shader &instance);
-
-        static constexpr bool open_as_text = true;
-        static constexpr bool free_underlying_once_loaded = true;
     };
 }

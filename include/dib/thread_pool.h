@@ -33,7 +33,7 @@ namespace dib::threading
         };
 
         size_t _thread_count;
-        dib::structures::DArray<ThreadBlock> _threads;
+        dib::structures::DynArray<ThreadBlock> _threads;
         std::atomic_uint _threads_free;
         std::mutex _thread_completed_mutex;
         std::condition_variable _thread_completed;

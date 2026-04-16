@@ -842,9 +842,6 @@ namespace dib::refl
                 && _is_volatile == other._is_volatile;
         }
     //#endregion
-
-    template<std::meta::info T>
-    class AttributeProxy {};
     
     struct Manager 
     {
@@ -939,30 +936,23 @@ namespace dib::refl
         using namespace std::ranges;
 
         // Collect all attributes into a static array.
-        // Permit the user to 'inject' attributes via AttributeProxy.
-        // Note that this approach can create issues, as only one injection point
-        // is queried.
         auto attributes = std::vector<AnyRef>{};
-        constexpr auto annotations = std::define_static_array([]
-        {
-            auto result = std::meta::annotations_of(I);
 
-            if constexpr(is_type(I))
-            {
-                result.append_range(std::meta::annotations_of(^^AttributeProxy<I>));
-            }
-
-            return result;
-        }());
-
+        // TODO: re-enable; right now this code throws a fake error via clangd when definition
+        // TODO: of annotated type is outside the current file
+        #if 0
+        constexpr auto annotations = std::define_static_array(std::meta::annotations_of(I));
+        
         template for(constexpr auto a : annotations)
         {
             using A = [:std::meta::type_of(a):];
             
-            auto &attr_val = std::define_static_array((std::vector<A>){ std::meta::extract<A>(a) })[0];
+            constexpr auto attr_vec = std::meta::extract<A>(a);
+            auto &attr_val = std::define_static_array(std::span<const A>(&attr_vec, 1))[0];
             
             attributes.push_back(AnyRef(ReflectionImpl::compute_type<A>(), (void *)&attr_val));
         }
+        #endif
 
         def._attributes = dib::define_any_static_array(attributes);
 

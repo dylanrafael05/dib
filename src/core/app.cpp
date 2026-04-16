@@ -15,6 +15,11 @@
 using namespace dib;
 using namespace dib::res;
 
+App &App::set_config_flags(int flags)
+{
+    SetConfigFlags(flags);
+    return *this;
+}
 App &App::set_fps(float target_fps)
 {
     this->target_fps = target_fps;
@@ -58,6 +63,7 @@ void App::run()
     SetTraceLogLevel(LOG_ALL);
     InitWindow(window_width, window_height, title.c_str());
     SetTraceLogLevel(LOG_INFO);
+    SetExitKey(0);
 
     if(!IsWindowReady())
     {
@@ -69,7 +75,7 @@ void App::run()
     systems().execute(world(), ecs::groups::Start);
 
     // Execute main loop
-    while (!WindowShouldClose())
+    while (!WindowShouldClose() && !_wants_close)
     {
         systems().execute(world(), ecs::groups::Main);
     }

@@ -3,7 +3,7 @@
 
 // Driver functions //
 void dib::ecs::BasicQuery::for_each(
-    dib::functional::FunctionRef<void(Entity)> fn, bool sync) const
+    dib::functional::FunctionRef<void(EntityID)> fn, bool sync) const
 {
     auto &archetypes = entities->query_map[*archetype];
     auto arch_id = 0zu;
@@ -55,7 +55,7 @@ void dib::ecs::BasicQuery::for_each(
 }
 
 void dib::ecs::BasicQuery::for_each_exact(
-    dib::functional::FunctionRef<void(Entity)> fn, bool sync) const
+    dib::functional::FunctionRef<void(EntityID)> fn, bool sync) const
 {
     auto arch_it = entities->archetype_map.find(*archetype);
 
@@ -97,10 +97,10 @@ void dib::ecs::BasicQuery::for_each_exact(
 }
 
 // External API //
-void dib::ecs::BasicQuery::for_each(dib::functional::FunctionRef<void(Entity)> fn) const { for_each(fn, false); }
-void dib::ecs::BasicQuery::for_each_sync(dib::functional::FunctionRef<void(Entity)> fn) const { for_each(fn, true); }
-void dib::ecs::BasicQuery::for_each_exact(dib::functional::FunctionRef<void(Entity)> fn) const { for_each_exact(fn, false); }
-void dib::ecs::BasicQuery::for_each_exact_sync(dib::functional::FunctionRef<void(Entity)> fn) const { for_each_exact(fn, true); }
+void dib::ecs::BasicQuery::for_each(dib::functional::FunctionRef<void(EntityID)> fn) const { for_each(fn, false); }
+void dib::ecs::BasicQuery::for_each_sync(dib::functional::FunctionRef<void(EntityID)> fn) const { for_each(fn, true); }
+void dib::ecs::BasicQuery::for_each_exact(dib::functional::FunctionRef<void(EntityID)> fn) const { for_each_exact(fn, false); }
+void dib::ecs::BasicQuery::for_each_exact_sync(dib::functional::FunctionRef<void(EntityID)> fn) const { for_each_exact(fn, true); }
 
 size_t dib::ecs::BasicQuery::count_exact() const
 {

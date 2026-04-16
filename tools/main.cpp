@@ -1,4 +1,4 @@
-#include "dib/resources.h"
+#include "dib/resources/resources.h"
 #include "dib/project.h"
 #include "dib/env.h"
 

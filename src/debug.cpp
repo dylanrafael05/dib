@@ -28,6 +28,7 @@ namespace dib::debug
         {
             auto st = new backward::StackTrace;
             st->load_here();
+            // TODO: figure out why this breaks.
             return st;
         }
 

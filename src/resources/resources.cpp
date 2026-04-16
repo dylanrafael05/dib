@@ -1,4 +1,4 @@
-#include "dib/resources.h"
+#include "dib/resources/resources.h"
 #include "dib/debug.h"
 #include "dib/env.h"
 #include "dib/app.h"
@@ -146,6 +146,7 @@ void rdetail::LoadedResource::move_from(rdetail::LoadedResource &&other)
     _data = other._data;
     _destructor = other._destructor;
     _owner = other._owner;
+    _dependencies = MOVE(other._dependencies);
 
     other._data = nullptr;
 }
@@ -166,6 +167,7 @@ rdetail::LoadedResource::LoadedResource()
     , _re_size(0)
     , _data(nullptr)
     , _destructor(nullptr)
+    , _dependencies()
 {}
 
 rdetail::LoadedResource::LoadedResource(rdetail::LoadedResource &&other) noexcept
@@ -270,7 +272,12 @@ void dib::res::ResourceBatch::parse_header()
     }
 }
 
-const rdetail::LoadedResource &dib::res::ResourceBatch::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool)
+bool dib::res::ResourceBatch::requires_reload(std::string_view)
+{
+    return false;
+}
+
+const rdetail::LoadedResource &dib::res::ResourceBatch::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text)
 {
     auto key_it = resource_keys.find(name);
     if(key_it == resource_keys.end())
@@ -284,7 +291,10 @@ const rdetail::LoadedResource &dib::res::ResourceBatch::get_loaded(std::string_v
     {
         key.index = (uint32_t)loaded_resources.size();
 
-        char *buffer = new char[key.size_bytes + re_size];
+        auto bsize = key.size_bytes + re_size + (text ? 1 : 0);
+        char *buffer = new char[bsize];
+        std::memset(buffer, 0, bsize);
+
         file.seekg(key.offset_bytes);
         file.read(buffer + re_size, key.size_bytes);
         
@@ -411,32 +421,67 @@ fs::path dib::res::resource_batch_location()
 }
 
 // ResourceFolder //
+bool dib::res::ResourceFolder::requires_reload(std::string_view name)
+{
+    auto &now = resource_time_of_load[name];
+    auto framecounter = this_app().get_frame_counter();
+
+    // Never reload multiple times during a single frame //
+    if(now.frame_loaded == framecounter)
+    {
+        return false;
+    }
+    
+    // Only ever reload the first time this resource is checked for during a frame //
+    if(now.frame_last_checked == framecounter)
+    {
+        return false;
+    }
+    else
+    {
+        now.frame_last_checked = framecounter;
+    }
+
+    // Check if the underlying file has changed during runtime //
+    auto filename = fs::canonical(folder / name);
+    auto filetime = fs::last_write_time(filename).time_since_epoch();
+
+    if(filetime > now.sys_time)
+    {
+        return true;
+    }
+
+    // Delegate to dependencies and perform the same check //
+    auto &resource = loaded_resources.at(name);
+
+    for(auto &re : resource._dependencies)
+    {
+        if(requires_reload(re))
+            return true;
+    }
+
+    return false;
+}
+
 const rdetail::LoadedResource &dib::res::ResourceFolder::get_loaded(std::string_view name, Loader loader, size_t re_size, bool shrink, bool text)
 {
     using namespace std::chrono;
 
     auto it = loaded_resources.find(name);
-    bool should_reload = it == loaded_resources.end();
+    bool should_load = (it == loaded_resources.end()) || requires_reload(name);
 
     try
     {
-
-        if(it != loaded_resources.end())
+        // Remove the loaded resource if we are *re*loading it //
+        if(it != loaded_resources.end() && should_load)
         {
-            auto now = resource_time_of_load[name];
-
-            auto filename = fs::canonical(folder / name);
-            auto filetime = std::filesystem::last_write_time(filename).time_since_epoch();
-
-            if(filetime > now)
-            {
-                should_reload = true;
-                loaded_resources.erase(it);
-            }
+            loaded_resources.erase(it);
+            LOGF("Reloading dynamic resource {}", name);
         }
 
-        if(should_reload)
+        if(should_load)
         {
+            // Get the associated filename //
             auto filename = fs::canonical(folder / name);
 
             if(!fs::exists(filename))
@@ -444,33 +489,53 @@ const rdetail::LoadedResource &dib::res::ResourceFolder::get_loaded(std::string_
                 RUNTIME_ERROR("Attempt to open resource {} which does not exist", filename.string());
             }
 
+            // Get a stream into that file, and get the file size //
             auto stream = text ? ifstream(filename) : ifstream(filename, ios::binary);
             auto size = get_content_size(name);
 
-            auto buffer = new char[size + re_size];
+            // Allocate for the resource, loaded data, and null character for text files //
+            auto bsize = size + re_size + (text ? 1 : 0);
+            auto buffer = new char[bsize];
+            std::memset(buffer, 0, bsize);
 
+            // Read into the end of the buffer //
             stream.read(buffer + re_size, size);
 
+            // TODO; retheorycraft where and how to 'own' resource names; update this implementation and the ResourceBatch implementation
+            // Load the resource from the buffer //
             auto resource = loader(*_owner, name, buffer, size);
 
+            // Place the resource into the resource map //
             name_storage.emplace_back(name);
-            it = loaded_resources.insert({name_storage.back(), MOVE(resource)}).first;
+            auto insertion = loaded_resources.insert({name_storage.back(), MOVE(resource)});
+            it = insertion.first;
 
+            if(!insertion.second)
+                RUNTIME_ERROR("Failed to insert resource {} into resource map!", name);
+
+            // Shrink the allocation of the buffer to save on memory usage when needed //
             if(shrink)
-            {
                 it->second.free_underlying_buffer();
-            }
 
-            auto sysclock = std::chrono::system_clock();
-            resource_time_of_load.insert({
-                name_storage.back(), std::chrono::duration_cast<std::chrono::milliseconds>(sysclock.now().time_since_epoch())});
+            // Record the time that we loaded our resource //
+            auto sysclock = system_clock();
+            resource_time_of_load[name_storage.back()] = {
+                .frame_loaded = this_app().get_frame_counter(),
+                .frame_last_checked = this_app().get_frame_counter(),
+                .sys_time = duration_cast<milliseconds>(sysclock.now().time_since_epoch())
+            };
+
+            // Log resource loading //
+            LOGF("Loaded resource {}", name);
         }
 
+        // Return the resource //
         return it->second;
 
     }
     catch(fs::filesystem_error &fs)
     {
+        // Reformat filesystem errors to runtime errors //
         RUNTIME_ERROR(
             "Attempt to open resource {} which does not exist. ([INTERNAL] {})", 
             (folder / name).string(), 
@@ -480,6 +545,7 @@ const rdetail::LoadedResource &dib::res::ResourceFolder::get_loaded(std::string_
 
 size_t dib::res::ResourceFolder::get_content_size(std::string_view filename) const
 {
+    // Delegate to our 'fixed' file size implementation //
     return fixed_file_size(folder / filename);
 }
 
@@ -496,6 +562,11 @@ void dib::res::ResourceFolder::copy_content_to_buffer(std::string_view filename,
 
     auto size = get_content_size(filename);
     stream.read((char *) buffer, size);
+
+    if(text)
+    {
+        ((char *)(buffer))[size] = '\0';
+    }
 }
 
 // Resources //
@@ -529,9 +600,10 @@ size_t Text::size() const
     return _size;
 }
 
-void ResourceInterface<Text>::load(Resources &, Text &instance, std::string_view, const char *buffer, size_t size)
+void ResourceInterface<Text>::load(Resources &, Text &instance, std::string_view, const char *buffer, size_t)
 {
-    instance = {buffer, size};
+    // TODO: figure out why resources over-allocate for text
+    instance = {buffer, strlen(buffer)};
 }
 
 // Image //
@@ -597,33 +669,6 @@ void ResourceInterface<::Model>::load(Resources &, ::Model &instance, std::strin
 void ResourceInterface<::Model>::unload(Resources &, ::Model &instance)
 {
     UnloadModel(instance);
-}
-
-// Shader //
-void ResourceInterface<::Shader>::load(Resources &resources, ::Shader &instance, std::string_view filename, const char *buffer, size_t)
-{
-    std::istringstream sread(buffer);
-	json::JsonReader jread(sread);
-
-	std::string vertex, fragment;
-
-	jread.read_start_object()
-		.expect_kvp("vert", vertex)
-		.expect_kvp("frag", fragment)
-		.read_end_object()
-		.end();
-
-	auto base_path = fs::path(filename).parent_path();
-
-	auto vert_code = resources.get<Text>(vertex);
-	auto frag_code = resources.get<Text>(fragment);
-
-	instance = LoadShaderFromMemory(frag_code->c_str(), vert_code->c_str());
-}
-
-void ResourceInterface<::Shader>::unload(Resources &, ::Shader &instance)
-{
-    UnloadShader(instance);
 }
 
 //* This code is preserved for later re-introduction *//

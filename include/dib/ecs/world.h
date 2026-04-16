@@ -2,13 +2,15 @@
 
 #include "dib/ecs/entities.h"
 #include "dib/ecs/singletons.h"
+#include "dib/ecs/messages.h"
 #include "dib/ecs/world_fwd.h"
 #include "dib/ecs/state_machine.h"
-#include "dib/resources.h"
+#include "dib/resources/resources.h"
 
 namespace dib::ecs
 {
 	// TODO: what should we do with this class? consider reorganization.
+	
 	class World :
 		public Entities,
 		private Singletons,

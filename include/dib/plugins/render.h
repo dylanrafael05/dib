@@ -3,6 +3,7 @@
 #include "dib/app.fwd.h"
 #include "dib/ecs/systems_fwd.h"
 #include "dib/ecs/entities.h"
+#include "dib/ecs/singletons.h"
 #include "dib/math/vec.h"
 
 #include "raylib.h"
@@ -16,7 +17,7 @@ namespace dib::plugins
         void inject(dib::App &app) const;
     };
 
-    struct CameraHandler 
+    struct [[=ecs::singleton]] CameraHandler 
     {
         dib::ecs::EntityID main_camera;
     };

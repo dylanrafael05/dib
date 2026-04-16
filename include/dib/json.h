@@ -10,11 +10,17 @@
 #include <string>
 #include <string_view>
 #include <iosfwd>
-
+#include <ranges>
 #include <concepts>
 
+#include "dib/collections.h"
+#include "dib/metautils.h"
 #include "dib/types.h"
 #include "dib/option.h"
+#include "dib/vector.h"
+#include "dib/json.attr.h"
+#include "dib/math/vec.h"
+#include "meta"
 
 namespace dib::json
 {
@@ -230,24 +236,6 @@ namespace dib::json
 
             return *this;
         }
-
-        template<IsCollection T> requires (!IsMaplikeCollection<T>)
-        JsonReader &read(T &value)
-        {
-            using X = typename T::value_type;
-
-            read_start_array();
-            while(!at_close_array())
-            {
-                X val = X();
-                read(val);
-
-                value.push_back(val);
-            }
-            read_end_array();
-
-            return *this;
-        }
         
         template<IsMaplikeCollection T>
         JsonReader &read(T &value)
@@ -331,6 +319,9 @@ namespace dib::json
         JsonWriter &write(int16_t);
         JsonWriter &write(int32_t);
         JsonWriter &write(int64_t);
+        JsonWriter &write(uint8_t);
+        JsonWriter &write(uint16_t);
+        JsonWriter &write(uint32_t);
         JsonWriter &write(uint64_t);
         JsonWriter &write(float);
         JsonWriter &write(double);
@@ -395,19 +386,7 @@ namespace dib::json
             return *this;
         }
 
-        // Wrappers for containers //
-        template<IsCollection T> requires (!IsMaplikeCollection<T>)
-        JsonWriter &write(const T &collection)
-        {
-            write_start_array();
-            for(auto &e : collection)
-            {
-                write(e);
-            }
-            write_end_array();
-            return *this;
-        }
-        
+        // Wrappers for containers //        
         template<IsMaplikeCollection T>
         JsonWriter &write(const T &collection)
         {
@@ -647,13 +626,85 @@ namespace dib::json
         }
     };
 
+    /// Override the json interface for generic container types of compatible types
+    template<collections::IsBasicList List>
+    struct JsonInterface<List>
+    {
+        using Value = collections::ValueOf<List>;
+
+        static void write(JsonWriter &writer, const List &value)
+        {
+            writer.write_start_array();
+            for(auto &el : value)
+            {
+                writer.write(el);
+            }
+            writer.write_end_array();
+        }
+
+        static void read(JsonReader &reader, List &value)
+        {
+            if constexpr(!collections::IsInsertable<List>)
+            {
+                // For collections which do not support growing at runtime,
+                // we need a temporary buffer to store elements.
+                structures::Vector<Value> temp;
+
+                reader.read_start_array();
+                while(!reader.at_close_array())
+                {
+                    Value v; reader.read(v);
+                    temp.push_back(MOVE(v));
+                }
+                reader.read_end_array();
+
+                collections::reserve(value, temp.size());
+                for(auto i = 0uz; i < temp.size(); i++)
+                {
+                    value[i] = MOVE(temp[i]);
+                }
+            }
+            else
+            {
+                // Otherwise, we can read directly into the provided instance
+                reader.read_start_array();
+                while(!reader.at_close_array())
+                {
+                    Value v; reader.read(v);
+                    collections::insert(value, MOVE(v));
+                }
+                reader.read_end_array();
+            }
+        }
+    };  
+
+    template<class T, size_t N>
+    struct JsonInterface<dib::math::vec<T, N>>
+    {
+        static void write(json::JsonWriter &writer, const dib::math::vec<T, N> &value)
+        {
+            writer.write_start_array();
+            template for(constexpr auto I : std::ranges::views::iota(0uz, N))
+                writer.write(value.template get<I>());
+            writer.write_end_array();
+        }
+
+        static void read(json::JsonReader &reader, dib::math::vec<T, N> &value)
+        {
+            reader.read_start_array();
+            template for(constexpr auto I : std::ranges::views::iota(0uz, N))
+                reader.read(value.template get<I>());
+            reader.read_end_array();
+        }
+    };
+
     /// Override the json interface for the option type.
     template<class Type>
     struct JsonInterface<dib::option::Option<Type>>
     {
         static void write(JsonWriter &writer, const dib::option::Option<Type> &value)
         {
-            if (value) writer.write(*value);
+            if (value) writer.write(value.unwrap());
             else writer.write(null);
         }
 
@@ -668,6 +719,70 @@ namespace dib::json
             {
                 Type val = Type(); reader.read(val);
                 value = val;
+            }
+        }
+    };
+    
+    template<AnnotatedDirectlyWith<DeriveJson> Type>
+    struct JsonInterface<Type>
+    {
+        static void write(JsonWriter &writer, const Type &value)
+        {
+            if constexpr(std::is_enum_v<Type>)
+            {
+                template for(constexpr auto f : std::define_static_array(
+                    std::meta::enumerators_of(^^Type)))
+                {
+                    if(value == [:f:])
+                    {
+                        writer.write(std::meta::identifier_of(f));
+                    }
+                }
+            }
+            else
+            {
+                writer.write_start_object();
+                template for(constexpr auto f : std::define_static_array(
+                    std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked())))
+                {
+                    constexpr auto id = dib::annotation<Rename>(f)
+                        .map([](auto &&r) { return r.to; })
+                        .unwrap_or(std::define_static_string(std::meta::identifier_of(f)));
+
+                    writer.write_kvp(id, value.[:f:]);
+                }
+                writer.write_end_object();
+            }
+        }
+        
+        static void read(JsonReader &reader, Type &value)
+        {
+            if constexpr(std::is_enum_v<Type>)
+            {
+                std::string str; reader.read(str);
+
+                template for(constexpr auto f : std::define_static_array(
+                    std::meta::enumerators_of(^^Type)))
+                {
+                    if(str == std::meta::identifier_of(f))
+                    {
+                        value = [:f:];
+                    }
+                }
+            }
+            else
+            {
+                reader.read_start_object();
+                template for(constexpr auto f : std::define_static_array(
+                    std::meta::nonstatic_data_members_of(^^Type, std::meta::access_context::unchecked())))
+                {
+                    constexpr auto id = dib::annotation<Rename>(f)
+                        .map([](auto &&r) { return r.to; })
+                        .unwrap_or(std::define_static_string(std::meta::identifier_of(f)));
+
+                    reader.expect_kvp(id, value.[:f:]);
+                }
+                reader.read_end_object();
             }
         }
     };

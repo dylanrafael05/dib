@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 #include "dib/conststring.h"
-#include "dib/resources.h"
+#include "dib/resources/resources.h"
 #include "dib/plugins/concept.h"
 #include "dib/ecs/entities.h"
 #include "dib/ecs/singletons.h"
@@ -11,18 +11,19 @@
 #include "dib/ecs/world.h"
 #include "dib/ecs/systems.h"
 #include "dib/app.fwd.h"
+#include "dib/ints.h"
 
 // Module helper functions //
 #define __dibapp_eval(x) x
 
 #define __file_line_col __FILE__, __LINE__
 #define __on_app_load \
-    void __on_app_load__(::dib::detail::UniqueIdentifier<__file_line_col>); \
+    void __on_app_load__(::dib::App &app, ::dib::detail::UniqueIdentifier<__file_line_col>); \
     template<> const char ::dib::detail::UniqueIdentifier<__file_line_col>::value = []{ \
-        __on_app_load__(::dib::detail::UniqueIdentifier<__file_line_col>{}); \
+        __on_app_load__(::dib::this_app(), ::dib::detail::UniqueIdentifier<__file_line_col>{}); \
         return 0; \
     }(); \
-    void __on_app_load__(::dib::detail::UniqueIdentifier<__file_line_col>)
+    void __on_app_load__(::dib::App &app, ::dib::detail::UniqueIdentifier<__file_line_col>)
 
 #define on_app_load __dibapp_eval(__on_app_load)
 
@@ -37,11 +38,7 @@ namespace dib
         };
     }
 
-#ifdef DIBAPP_BATCH
-    constexpr bool use_batch = true;
-#else
-    constexpr bool use_batch = false;
-#endif
+    constexpr bool use_batch = IS_FLAG_DEFINED(DIBAPP_BATCH);
 
     namespace detail
     {
@@ -60,6 +57,7 @@ namespace dib
         int window_width = 0;
         int window_height = 0;
         bool _running = false;
+        bool _wants_close = false;
 
         App()
         { 
@@ -75,6 +73,8 @@ namespace dib
         friend App &dib::this_app();
 
     public:
+        u64 get_frame_counter() const;
+
         ecs::Systems &systems() { return _sys_scheduler; }
         const ecs::Systems &systems() const { return _sys_scheduler; }
         
@@ -97,6 +97,7 @@ namespace dib
         App &set_fps(float target_fps);
         App &set_title(const std::string &title);
         App &set_dimensions(int width, int height);
+        App &set_config_flags(int flags);
         App &initialize(int argc, const char *const *argv);
 
         App &inject(dib::plugins::IsPlugin auto &&plug)
@@ -105,15 +106,23 @@ namespace dib
             return *this;
         }
 
+        template<class ...State>
+        App &set_states(State &&...state)
+        {
+            (state_machine().init(FORWARD(state)), ...);
+            return *this;
+        }
+
 		App &add_system(ecs::System &&sys);
 		App &add_systems(const std::initializer_list<ecs::System> &systems);
 
         void run();
+        void exit() { _wants_close = true; }
     };
 
-    template<class T>
+    template<ecs::IsSingleton T>
     inline T &get_singleton() { return singletons().get<T>(); }
 
-    template<ecs::NotComponentPack... T>
+    template<ecs::IsComponent... T>
     inline ecs::Query<T...> query() { return entities().query<T...>(); }
 }

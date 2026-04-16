@@ -317,8 +317,15 @@ namespace dib
     }
 
     template<class T, class ...A>
-    concept annotated_with = (has_annotation(^^T, ^^A, true) || ...);
+    concept AnnotatedWith = (has_annotation(^^T, ^^A, true) || ...);
     template<class T, class ...A>
-    concept annotated_directly_with = (has_annotation(^^T, ^^A, false) || ...);
+    concept AnnotatedDirectlyWith = (has_annotation(^^T, ^^A, false) || ...);
+    
+
+    template<bool If, auto T>
+    constexpr auto when = []{
+        if constexpr(If) return T;
+        else return 0;
+    };
 
 }

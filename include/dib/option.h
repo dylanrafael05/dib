@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "dib/preprocess.h"
+#include "dib/record.h"
 #include "dib/types.h"
 #include "dib/debug.h"
 
@@ -21,9 +22,30 @@ namespace dib::option
 
 	inline constexpr auto none = NoneType::get();
 
+	/// A wrapper around a raw pointer which prevents users from
+	/// dereferencing a null value.
+	template<class T>
+	class [[=hash_as_record, =compare_as_record]] SafePointer
+	{
+		T *_ptr;
+
+	public:
+		constexpr SafePointer(T *ptr) : _ptr(ptr) {}
+
+		constexpr operator bool() const { return _ptr != nullptr; }
+		constexpr T &operator*() const { return *operator->(); }
+		constexpr T *operator->() const
+		{ 
+			if(_ptr == nullptr) [[unlikely]]
+				RUNTIME_ERROR("Attempt to access value of null SafePointer");
+
+			return _ptr; 
+		}
+	};
+
 	/// A type which holds either a value or the absence of one
 	template<class T>
-	class Option 
+	class [[=provides_hash]] Option 
 		: public types::TriviallyRelocatableIf<types::is_trivially_relocatable<T>>
 	{
 		union { T _value; char _dummy; };
@@ -141,6 +163,9 @@ namespace dib::option
 
 		constexpr operator bool() const { return _has_value; }
 		constexpr bool has_value() const { return _has_value; }
+		
+		constexpr SafePointer<T> 	   try_get()       { return _has_value ? &_value : nullptr; }
+		constexpr SafePointer<const T> try_get() const { return _has_value ? &_value : nullptr; }
 
 		template<class Self>
 		constexpr decltype(auto) unwrap(this Self &&self)
@@ -148,7 +173,7 @@ namespace dib::option
 			if(!self.has_value()) 
 				RUNTIME_ERROR("Unwrapping a 'none'"); 
 
-			return static_cast<types::CopyConstRef<Self &&, T>>(*std::addressof(self._value)); 
+			return static_cast<types::CopyConstRef<Self &&, T>>((T &)(self._value)); 
 		}
 
 		constexpr T unwrap_or(T &&value) &&
@@ -173,22 +198,22 @@ namespace dib::option
 		}
 
 		template<std::invocable<T &&> Fn>
-		constexpr auto map(Fn &&fn) && -> Option<std::invoke_result_t<Fn, const T &>>
+		constexpr auto map(Fn &&fn) && -> Option<std::invoke_result_t<Fn, T &&>>
 		{
 			if (_has_value)
 			{
-				return fn(MOVE(_value));
+				return std::invoke(fn, MOVE(_value));
 			}
 
 			return {};
 		}
 
 		template<std::invocable<T &&> Fn>
-		constexpr auto then(Fn &&fn) && -> Option<typename std::invoke_result_t<Fn, const T &>::value_type>
+		constexpr auto then(Fn &&fn) && -> Option<typename std::invoke_result_t<Fn, T &&>::value_type>
 		{
 			if (_has_value)
 			{
-				auto r = fn(MOVE(_value));
+				auto r = std::invoke(fn, MOVE(_value));
 
 				if (r) return r;
 				else return {};
@@ -197,8 +222,24 @@ namespace dib::option
 			return {};
 		}
 
-		constexpr auto as_ref() & { return *this ? Option<T &>(**this) : none; }
-		constexpr auto as_ref() const & { return *this ? Option<const T &>(**this) : none; }
+		constexpr auto ref() & { return *this ? Option<T &>(unwrap()) : none; }
+		constexpr auto ref() const & { return *this ? Option<const T &>(unwrap()) : none; }
+
+		constexpr bool operator==(const Option<T> &other) const requires types::IsEqualityComparable<T>
+		{
+			if(!has_value()) return !other.has_value();
+			if(!other.has_value()) return !has_value();
+
+			return unwrap() == other.unwrap();
+		}
+
+		constexpr size_t get_hash() const requires types::IsHashable<T>
+		{
+			if(!has_value())
+				return 0;
+
+			return dib::get_hash(unwrap());
+		}
 	};
 
 	/// Specialization to handle references
@@ -227,6 +268,9 @@ namespace dib::option
 
 		constexpr operator bool() const { return _ptr != nullptr; }
 		constexpr bool has_value() const { return _ptr != nullptr; }
+		
+		constexpr SafePointer<T> 	   try_get()       { return _ptr; }
+		constexpr SafePointer<const T> try_get() const { return _ptr; }
 
 		template<class Self>
 		constexpr decltype(auto) unwrap(this Self &&self) 
@@ -262,7 +306,7 @@ namespace dib::option
 		{
 			if (has_value())
 			{
-				return fn(*_ptr);
+				return std::invoke(fn, *_ptr);
 			}
 
 			return {};
@@ -273,7 +317,7 @@ namespace dib::option
 		{
 			if (has_value())
 			{
-				auto r = fn(*_ptr);
+				auto r = std::invoke(fn, *_ptr);
 
 				if (r) return MOVE(r);
 				else return {};
@@ -313,4 +357,32 @@ namespace dib::option
 	{
 		return { std::forward<V>(val) };
 	}
+}
+
+// NOTE; we have to define this here because otherwise we get into a dependency loop
+namespace dib
+{
+	template<class T>
+    consteval option::Option<T> annotation(std::meta::info refl, bool include_bases=true)
+    {
+        for(auto annotation : std::meta::annotations_of(refl))
+        {
+            if(std::meta::is_assignable_type(^^T, std::meta::type_of(annotation)))
+            {
+                return std::meta::extract<T>(annotation);
+            }
+        }
+
+        if(include_bases && std::meta::is_type(refl) && std::meta::is_class_type(refl))
+        {
+            for(auto base : std::meta::bases_of(refl, std::meta::access_context::unprivileged()))
+            {
+                auto partial = annotation<T>(std::meta::type_of(base));
+                if(partial)
+                    return partial;
+            }
+        }
+
+        return option::none;
+    }
 }

@@ -52,7 +52,7 @@ namespace dib::ecs
 		StateMachine(StateMachine &&) = delete;
 
 		template<class T>
-		void init(const T &value)
+		StateMachine &init(T &&value)
 		{
 			if (_current_state.contains(typeid(T)))
 			{
@@ -62,6 +62,8 @@ namespace dib::ecs
 			auto &state = _current_state[typeid(T)];
 			state.value = value;
 			state.group = groups::OnExitOrFallback(value);
+
+			return *this;
 		}
 
 		template<class T>
@@ -99,8 +101,8 @@ namespace dib::ecs
 	};
 
 	template<auto... States>
-	bool is_in_state(StateMachine &state)
+	bool is_in_state()
 	{
-		return ((state.current<decltype(States)>() == States) && ...);
+		return ((dib::state_machine().current<decltype(States)>() == States) && ...);
 	}
 }

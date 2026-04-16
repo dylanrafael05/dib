@@ -1,4 +1,3 @@
-#include "dib/ecs/world.h"
 #include "dib/debug.h"
 #include "dib/ecs/entities.h"
 #include "dib/bijection.h"
@@ -41,9 +40,23 @@ refl::Type ComponentID::type() const
     RUNTIME_ERROR("No component type descriptor associated with id {}", value());
 }
 
-bool Entity::is_invalid() const
+const EntityID EntityID::invalid;
+
+bool EntityID::is_invalid() const
 {
     return index == INVALID_ID;
+}
+
+bool EntityID::is_valid() const
+{
+    return index != INVALID_ID;
+}
+
+bool EntityID::is_alive() const
+{
+    return is_valid()
+        && entities().entity_map.size() > index 
+        && entities().entity_map[index].version == version;
 }
 
 // Archetype //
@@ -296,7 +309,7 @@ uint64_t Entities::alloc_in_arch(detail::ArchetypeStorage &storage)
         {
             vec.alloc_back();
         }
-        storage.entity_ids.emplace_back();
+        storage.entity_ids.emplace_back(EntityID::invalid);
 
         return storage.capacity++;
     }
@@ -314,34 +327,29 @@ void Entities::dealloc_entity(uint64_t index)
     free_ids.push_back(index);
 }
 
-bool Entities::has_component(Entity id, ComponentID cid) const
+bool EntityID::has_component(ComponentID cid) const
 {
-    assert_exists(id);
-    return archetype_stores[entity_map[id.index].archetype].archetype.has_component(cid);
+    entities().assert_exists(*this);
+    return entities().archetype_stores[entities().entity_map[index].archetype].archetype.has_component(cid);
 }
 
-void Entities::assert_exists(Entity id) const
+void Entities::assert_exists(EntityID id) const
 {
-    if(entity_map.size() <= id.index || entity_map[id.index].version != id.version)
+    if(!id.is_alive())
     {
         RUNTIME_ERROR("Invalid access to entity with id {}.", auto(id.index));
     }
 }
 
-void Entities::assert_has_component(Entity id, ComponentID cid) const
+void Entities::assert_has_component(EntityID id, ComponentID cid) const
 {
-    if(!has_component(id, cid))
+    if(!id.has_component(cid))
     {
         RUNTIME_ERROR("Attempt to access a component of type {} which does not exist.", cid.type().name());
     }
 }
 
-bool Entities::is_alive(Entity id) const
-{
-    return entity_map.size() > id.index && entity_map[id.index].version == id.version;
-}
-
-Entity Entities::create_entity()
+EntityID Entities::create_entity()
 {
     auto index = alloc_entity();
     auto &entry = entity_map[index];
@@ -349,13 +357,13 @@ Entity Entities::create_entity()
     entry.archetype = 0;
     entry.index = alloc_in_arch(archetype_stores[0]);
 
-    auto entity_id = Entity(index, entry.version);
+    auto entity_id = EntityID(index, entry.version);
     archetype_stores[0].entity_ids[entry.index] = entity_id;
 
     return entity_id;
 }
 
-Entity Entities::create_uninitialized_entity(const Archetype &archetype)
+EntityID Entities::create_uninitialized_entity(const Archetype &archetype)
 {
     detail::ArchetypeID archetype_id;
 
@@ -383,35 +391,36 @@ Entity Entities::create_uninitialized_entity(const Archetype &archetype)
     entry.archetype = archetype_id;
     entry.index = alloc_in_arch(archetype_stores[archetype_id]);
 
-    auto entity_id = Entity(index, entry.version);
+    auto entity_id = EntityID(index, entry.version);
     archetype_stores[archetype_id].entity_ids[entry.index] = entity_id;
 
     return entity_id;
 }
 
-void *Entities::get_component_raw(Entity id, ComponentID cid)
+/// Get the archetype of this entity
+const Archetype &EntityID::get_archetype() const
 {
-    assert_exists(id);
-    assert_has_component(id, cid);
+    return entities().archetype_stores[entities().entity_map[index].archetype].archetype;
+}
+
+void *EntityID::get_component_raw(ComponentID cid) const
+{
+    entities().assert_exists(*this);
+    entities().assert_has_component(*this, cid);
     
     if(cid.type().packed_size() == 0)
     {
         return mem::pointer_to_zst<void>();
     }
     
-    auto &entry = entity_map[id.index];
-    auto &storage = archetype_stores[entry.archetype];
+    auto &entry = entities().entity_map[index];
+    auto &storage = entities().archetype_stores[entry.archetype];
     auto &vec = storage.component_stores[cid];
 
     return vec.pointer(entry.index);
 }
 
-const void *Entities::get_component_raw(Entity id, ComponentID cid) const
-{
-    return const_cast<Entities*>(this)->get_component_raw(id, cid);
-}
-
-void Entities::add_component_raw(Entity id, ComponentID cid, dib::structures::ErasedPtr value)
+void Entities::add_component_raw(EntityID id, ComponentID cid, dib::structures::ErasedPtr value)
 {
     assert_exists(id);
 
@@ -437,7 +446,7 @@ void Entities::add_component_raw(Entity id, ComponentID cid, dib::structures::Er
     entry.index = new_pos;
 }
 
-void Entities::remove_component(Entity id, ComponentID cid)
+void Entities::remove_component(EntityID id, ComponentID cid)
 {
     assert_exists(id);
 
@@ -467,7 +476,7 @@ void Entities::remove_component(Entity id, ComponentID cid)
     entry.index = new_pos;
 }
 
-void Entities::destroy_entity(Entity id)
+void Entities::destroy_entity(EntityID id)
 {
     assert_exists(id);
 

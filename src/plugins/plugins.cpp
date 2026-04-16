@@ -16,7 +16,7 @@ namespace dib::plugins::groups
     ecs::decl::SystemGroup RenderUI;
 }
 
-struct RenderSettings
+struct [[=ecs::singleton]] RenderSettings
 {
     Color bg_color;
 };
@@ -31,30 +31,29 @@ void AudioPlugin::inject(App &app) const
 
 void init_render()
 {
-    this_app().singletons().create<CameraHandler>();
+    singletons().create<CameraHandler>();
 }
 
 void plugins::clear_background()
 {
     ClearBackground(
-        this_app().singletons().get<RenderSettings>().bg_color);
+        get_singleton<RenderSettings>().bg_color);
 }
 
 void begin_draw_world()
 {
-    auto &world = this_app().world();
-    auto &handler = this_app().singletons().get<CameraHandler>();
+    auto &handler = get_singleton<CameraHandler>();
     auto cam = handler.main_camera;
 
     if(!cam.is_invalid())
     {
-        if(world.has_component<CameraComponent2D>(cam))
+        if(cam.has_component<CameraComponent2D>())
         {
-            BeginMode2D(world.get_component<CameraComponent2D>(cam).raylib);
+            BeginMode2D(cam.get_component<CameraComponent2D>().raylib);
         }
-        else if(world.has_component<CameraComponent3D>(cam))
+        else if(cam.has_component<CameraComponent3D>())
         {
-            BeginMode3D(world.get_component<CameraComponent3D>(cam).raylib);
+            BeginMode3D(cam.get_component<CameraComponent3D>().raylib);
         }
         else
         {
@@ -70,17 +69,16 @@ void begin_draw_world()
 
 void end_draw_world()
 {
-    auto &world = this_app().world();
-    auto &handler = this_app().singletons().get<CameraHandler>();
+    auto &handler = get_singleton<CameraHandler>();
     auto cam = handler.main_camera;
 
     if(!cam.is_invalid())
     {
-        if(world.has_component<CameraComponent2D>(cam))
+        if(cam.has_component<CameraComponent2D>())
         {
             EndMode2D();
         }
-        else if(world.has_component<CameraComponent3D>(cam))
+        else if(cam.has_component<CameraComponent3D>())
         {
             EndMode3D();
         }

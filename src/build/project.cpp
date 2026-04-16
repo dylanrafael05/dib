@@ -3,7 +3,7 @@
 
 #include "dib/project.h"
 #include "dib/json.h"
-#include "dib/resources.h"
+#include "dib/resources/resources.h"
 
 #include <algorithm>
 

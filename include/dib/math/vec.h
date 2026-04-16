@@ -429,8 +429,9 @@ namespace dib::math
     {
         float length = dib::math::length(value);
 
-        for(size_t i = 0; i < N; i++)
-            value[i] = static_cast<T>(value[i] / length);
+        if(length > 0.0001)
+            for(size_t i = 0; i < N; i++)
+                value[i] = static_cast<T>(value[i] / length);
     }
 
     template<concepts::IsReal T, size_t N>

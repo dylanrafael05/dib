@@ -67,6 +67,9 @@ JsonWriter &JsonWriter::write(int8_t value) impl_val
 JsonWriter &JsonWriter::write(int16_t value) impl_val
 JsonWriter &JsonWriter::write(int32_t value) impl_val
 JsonWriter &JsonWriter::write(int64_t value) impl_val
+JsonWriter &JsonWriter::write(uint8_t value) impl_val
+JsonWriter &JsonWriter::write(uint16_t value) impl_val
+JsonWriter &JsonWriter::write(uint32_t value) impl_val
 JsonWriter &JsonWriter::write(uint64_t value) impl_val
 JsonWriter &JsonWriter::write(float value) impl_val
 JsonWriter &JsonWriter::write(double value) impl_val
