@@ -425,11 +425,23 @@ namespace dib::ecs
         {
             // Since we need to index our arguments without referring to the pack,
             // we nede to copy them into a tuple.
-            std::tuple<dib::mem::Forgotten<std::remove_cvref_t<Args>>...> targs
+            dib::mem::Forgotten<std::tuple<std::remove_cvref_t<Args>...>> targs
             {
                 FORWARD(args)...
             };
 
+            entries.push(targs.value());
+            entries.push((CommandPtr) [](Commands *self)
+            {
+                auto fn = Lambda{};
+
+                auto &args = self->entries.top_as<std::tuple<std::remove_cvref_t<Args>...>>();
+                fn(self->storage, static_cast<Args>(std::get<std::remove_cvref_t<Args>>(args))...);
+
+                self->entries.pop();
+            });
+
+            /*
             // We first push all the arguments (as owned copies or moves) to the entry
             // stack. This guarantees they live for at least as long as this instance
             using ReversedArgs = meta::ListReverse::Call<meta::List<Args...>>;
@@ -477,6 +489,7 @@ namespace dib::ecs
             };
 
             entries.push(command);
+            */
         }
 
         template<IsComponent ...Components>

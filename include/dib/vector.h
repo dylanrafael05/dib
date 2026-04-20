@@ -143,7 +143,7 @@ namespace dib::structures
 		}
 
 		T &operator[](int x, int y) { return operator[]({x, y}); }
-		const T &operator[](math::int2 index) const { return static_cast<DynArray2D<T>&>(*this)[index]; }
+		const T &operator[](math::int2 index) const { return const_cast<DynArray2D<T>&>(*this)[index]; }
 		const T &operator[](int x, int y) const { return operator[]({x, y}); }
 
 	};

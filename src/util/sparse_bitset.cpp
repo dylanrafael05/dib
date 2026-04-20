@@ -442,7 +442,13 @@ det::SparseBitset_Impl det::SparseBitset_Impl::and_with(const SparseBitset_Impl 
 SparseBitsetIterator det::SparseBitset_Impl::begin() const
 {
     if(count == 0) return end();
-    return {begin_entries(), end_entries(), begin_entries()->bits};
+
+    auto begin = SparseBitsetIterator{begin_entries(), end_entries(), begin_entries()->bits};
+
+    if((begin.bits_iter & 1) == 0)
+        begin.increment();
+    
+    return begin;
 }
 
 SparseBitsetIterator det::SparseBitset_Impl::end() const
@@ -491,7 +497,7 @@ void dib::structures::SparseBitsetIterator::increment()
         bits_iter >>= 1;
         bit_count++;
 
-        assert(bit_count <= 16);
+        ASSERT(bit_count <= 16);
     }
 }
 

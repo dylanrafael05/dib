@@ -26,6 +26,7 @@ namespace dib::coro
             : handle(std::coroutine_handle<detail::Promise>::from_promise(promise))
         {}
 
+        bool initializing;
         std::coroutine_handle<detail::Promise> handle;
         ecs::EntityID associated_runner;
 
@@ -71,8 +72,9 @@ namespace dib::coro
             Coroutine get_return_object() 
             {
                 auto result = Coroutine(*this);
+                result.initializing = true;
 
-                result.associated_runner = entities().create_entity(CoroutineRunner
+                commands().create_entity(CoroutineRunner
                 {
                     .coro = result
                 });

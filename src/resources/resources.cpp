@@ -606,6 +606,23 @@ void ResourceInterface<Text>::load(Resources &, Text &instance, std::string_view
     instance = {buffer, strlen(buffer)};
 }
 
+// Buffer resources //
+Buffer::Buffer()
+    : _data(nullptr), _size(0)
+{}
+
+Buffer::Buffer(const char *ptr, size_t size)
+    : _data(ptr), _size(size)
+{}
+
+size_t Buffer::size() const { return _size; }
+const char *Buffer::data() const { return _data; }
+
+void ResourceInterface<Buffer>::load(Resources &, Buffer &instance, std::string_view, const char *buffer, size_t size)
+{
+    instance = {buffer, size};
+}
+
 // Image //
 void ResourceInterface<::Image>::load(Resources &, ::Image &instance, std::string_view filename, const char *buffer, size_t size)
 {

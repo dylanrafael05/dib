@@ -20,6 +20,8 @@
 #include "dib/vector.h"
 #include "dib/json.attr.h"
 #include "dib/math/vec.h"
+#include "dib/literals.h"
+#include "raylib.h"
 #include "meta"
 
 namespace dib::json
@@ -475,7 +477,7 @@ namespace dib::json
         {
             return visit(
                 [&](JsonReader &js) { js.expect_kvp(key, val); },
-                [&](JsonWriter &js) { js.write(key, val); }
+                [&](JsonWriter &js) { js.write_kvp(key, val); }
             );
         }
 
@@ -784,6 +786,69 @@ namespace dib::json
                 }
                 reader.read_end_object();
             }
+        }
+    };
+
+    template<>
+    struct JsonInterface<::Color>
+    {
+        static void write(JsonWriter &writer, const ::Color &value)
+        {
+            char buf[10];
+
+            buf[0] = '#';
+            buf[9] = 0;
+
+            auto pnibl = [&](uint8_t nibl, uint8_t index)
+            {
+                if(nibl >= 10) buf[index] = 'a' + (nibl - 10);
+                else buf[index] = '0' + nibl;
+            };
+
+            auto pbyte = [&](uint8_t byte, uint8_t index)
+            {
+                pnibl((byte & 0xF0) >> 4, index);
+                pnibl((byte & 0x0F) >> 0, index + 1);
+            };
+
+            pbyte(value.r, 1);
+            pbyte(value.g, 3);
+            pbyte(value.b, 5);
+            pbyte(value.a, 7);
+
+            writer.write((const char *)buf);
+        }
+
+        static void read(JsonReader &reader, ::Color &value)
+        {
+            std::string str;
+            reader.read(str);
+
+            value = dib::literals::hex_color(str.c_str(), str.size());
+        }
+    };
+    
+    template<>
+    struct JsonInterface<::Rectangle>
+    {
+        static void write(JsonWriter &js, const ::Rectangle &value)
+        {
+            js.write_start_array()
+                .write(value.x)
+                .write(value.y)
+                .write(value.width)
+                .write(value.height)
+                .write_end_array();
+        }
+
+        static void read(JsonReader &js, ::Rectangle &value)
+        {
+            js.read_start_array()
+                .read(value.x)
+                .read(value.y)
+                .read(value.width)
+                .read(value.height)
+                .read_end_array();
         }
     };
 

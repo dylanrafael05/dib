@@ -59,7 +59,9 @@ void App::run()
     SetLoadFileTextCallback(res::detail::file_load_text_callback);
 
     // Initialize raylib
-    SetTargetFPS(target_fps);
+    if(target_fps > 0) 
+        SetTargetFPS(target_fps);
+    
     SetTraceLogLevel(LOG_ALL);
     InitWindow(window_width, window_height, title.c_str());
     SetTraceLogLevel(LOG_INFO);
@@ -85,6 +87,7 @@ void App::run()
     
     // Perform cleanup //
     CloseWindow();
+    ::exit(0);
 }
 
 App &dib::this_app()

@@ -379,6 +379,30 @@ namespace dib::math
     }
 
     // Vector operations //
+    template<class O, class T, size_t N>
+    constexpr vec<O, N> as(vec<T, N> lhs)
+    {
+        return (vec<O, N>)lhs;
+    }
+    
+    template<class T, size_t N>
+    constexpr vec<float, N> as_float(vec<T, N> lhs)
+    {
+        return (vec<float, N>)lhs;
+    }
+    
+    template<class T, size_t N>
+    constexpr vec<int, N> as_int(vec<T, N> lhs)
+    {
+        return (vec<int, N>)lhs;
+    }
+    
+    template<class T, size_t N>
+    constexpr vec<unsigned int, N> as_uint(vec<T, N> lhs)
+    {
+        return (vec<unsigned int, N>)lhs;
+    }
+
     template<concepts::IsArithmetic T, size_t N>
     constexpr T dot(vec<T, N> lhs, vec<T, N> rhs)
     {

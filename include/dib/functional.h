@@ -98,7 +98,13 @@ namespace dib::functional
                 , env(env)
             {}
 
-            template<class Lambda>
+            constexpr FunctionRef_Impl(fn<R(Args...)> lambda)
+                : function([](void *env, Args ...args) -> R {
+                    return (*(fn<R(Args...)>)(env))(FORWARD(args)...); })
+                , env((void*) lambda)
+            {}
+
+            template<class Lambda> requires (!std::is_pointer_v<std::remove_reference_t<Lambda>> && std::invocable<Lambda, Args...>)
             constexpr FunctionRef_Impl(const Lambda &lambda)
                 : function([](void *env, Args ...args) -> R {
                     return (*(const Lambda *)(env))(FORWARD(args)...); })
@@ -195,17 +201,15 @@ namespace dib::functional
         {
             _is_fn_ptr = other._is_fn_ptr;
 
-            if(other._heap_ptr == nullptr)
-            {
-                _fn_ptr = nullptr;
-            }
-            else if(_is_fn_ptr)
+            if(_is_fn_ptr)
             {
                 _fn_ptr = other._fn_ptr;
             }
             else 
             {
-                _heap_ptr = other._heap_ptr->clone();
+                _heap_ptr = other._heap_ptr 
+                    ? other._heap_ptr->clone() 
+                    : nullptr;
             }
         }
 

@@ -7,10 +7,10 @@
 namespace dib::ops
 {
 #define op1(name, tname, op) \
-		constexpr auto name = DIB_LMB_NC_1((), op); \
+		constexpr auto name = DIB_LMB_1_C((), op); \
 		using tname = decltype(name)
 #define op2(name, tname, op) \
-		constexpr auto name = DIB_LMB_NC_2((), _1 op _2); \
+		constexpr auto name = DIB_LMB_2_C((), _1 op _2); \
 		using tname = decltype(name)
 
 	op2(less, Less, <);

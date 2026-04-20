@@ -37,6 +37,7 @@ void dib::coro::run_coroutines()
 {
     dib::query<cd::CoroutineRunner>().for_each_sync([](EntityID en, cd::CoroutineRunner &runner)
     {
+        runner.coro.associated_runner = en;
         auto &promise = runner.coro.handle.promise();
         
         if(auto awaiter = promise.awaiter.try_get(); !awaiter || awaiter->can_resume())

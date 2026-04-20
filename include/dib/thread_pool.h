@@ -80,6 +80,7 @@ namespace dib::threading
             , _thread_completed()
             , _tearing_down(false)
         {
+            // TODO: REIMPLEMENT THIS
             for(size_t i = 0; i < _threads.size(); i++)
             {
                 _threads[i].thread = std::thread(

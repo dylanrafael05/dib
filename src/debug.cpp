@@ -7,7 +7,9 @@
 #include <unordered_set>
 
 #include "external/backward.hpp"
-backward::SignalHandling sh;
+
+//! THIS CRASHES !//
+// backward::SignalHandling sh;
 
 struct [[=dib::provides_hash]] ErrorSource : dib::types::TriviallyRelocatable
 {

@@ -7,6 +7,11 @@
 
 namespace dib::math
 {   
+    template<concepts::IsInteger T>
+    constexpr T mod(T lhs, T rhs) { return lhs % rhs; }
+    template<concepts::IsReal T>
+    constexpr T mod(T lhs, T rhs) { return std::fmod(lhs, rhs); }
+
     template<concepts::IsLerpable T>
     constexpr T lerp(T start, T end, float t)
     {

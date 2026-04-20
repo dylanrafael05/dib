@@ -1,3 +1,4 @@
+#include "dib/math/externs.h"
 #include "dib/math/vec.h"
 #include "dib/math/misc.h"
 
@@ -67,6 +68,26 @@ __DIBMATH_INTEGRAL_EXTERNS()
     template vec<T, N> &dib::math::operator^=(vec<T, N> &, T);
 
 __DIBMATH_BITWISE_EXTERNS()
+#undef __func
+
+// Implementation for unary operators //
+#define __func(T, N, ...)                               \
+    template vec<T, N> dib::math::operator-(vec<T, N>); \
+    template vec<T, N> dib::math::operator+(vec<T, N>);
+
+__DIBMATH_SCALAR_EXTERNS()
+#undef __func
+
+#define __func(T, N, ...)                               \
+    template vec<T, N> dib::math::operator!(vec<T, N>);
+
+__DIBMATH_BOOL_EXTERNS()
+#undef __func
+
+#define __func(T, N, ...)                               \
+    template vec<T, N> dib::math::operator~(vec<T, N>); \
+
+__DIBMATH_INTEGRAL_EXTERNS()
 #undef __func
 
 // Miscelanneous functions //

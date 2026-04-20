@@ -5,7 +5,7 @@
 #include <ranges>
 
 #include "dib/vector.h"
-#include "dib/ops.h"
+#include "dib/lambda.h"
 
 namespace dib::pagination
 {
@@ -14,7 +14,7 @@ namespace dib::pagination
 	/// it publically exposes a method .evaluate(const K &) const which returns an integral type.
 	/// </summary>
 	template<class T, class K>
-	concept evaluator_for = requires(const T &eval, const K &value)
+	concept IsEvaluatorFor = requires(const T &eval, const K &value)
 	{
 		{ eval.evaluate(value) } -> std::integral;
 	};
@@ -35,9 +35,9 @@ namespace dib::pagination
 		}
 	};
 
-	static_assert(evaluator_for<DefaultEvaluator<int>, int>, 
+	static_assert(IsEvaluatorFor<DefaultEvaluator<int>, int>, 
 		"DefaultEvaluator should be an evaluator.");
-	static_assert(evaluator_for<DefaultEvaluator<char *>, char *>,
+	static_assert(IsEvaluatorFor<DefaultEvaluator<char *>, char *>,
 		"DefaultEvaluator should be an evaluator.");
 
 	/// <summary>
@@ -53,26 +53,26 @@ namespace dib::pagination
 		}
 	};
 
-	static_assert(evaluator_for<FnEvaluator<[](int x) { return x; }>, int>,
+	static_assert(IsEvaluatorFor<FnEvaluator<[](int x) { return x; }>, int>,
 		"FnEvaluator should be an evaluator.");
-	static_assert(evaluator_for<FnEvaluator<[](char *x) { return 0; }>, char *>,
+	static_assert(IsEvaluatorFor<FnEvaluator<[](char *x) { return 0; }>, char *>,
 		"FnEvaluator should be an evaluator.");
 
 	/// <summary>
 	/// The type which an object of the provided type evaluates to
 	/// given the provided evaluator. 
 	/// </summary>
-	template<class K, evaluator_for<K> T>
+	template<class K, IsEvaluatorFor<K> T>
 	using evaluation_t = decltype(std::declval<const T &>().evaluate(std::declval<const K &>()));
 
 	/// <summary>
 	/// A data structure which allows for O(1) lookup for values by their evaluation.
 	/// </summary>
-	template<class T, evaluator_for<T> Evaluator = DefaultEvaluator<T>>
+	template<class T, IsEvaluatorFor<T> Evaluator = DefaultEvaluator<T>>
 	class PageVector : private Evaluator
 	{
 		using eval_t = evaluation_t<T, Evaluator>;
-		using in_vec_t = structures::PtrVector<T>;
+		using in_vec_t = structures::Vector<T>;
 		using out_vec_t = std::vector<in_vec_t>;
 		using in_vec_it = in_vec_t::iterator;
 

@@ -452,6 +452,22 @@ namespace dib::res
         const char *c_str() const;
     };
 
+    // Buffer resource //
+    class Buffer
+    {
+        const char *_data;
+        size_t _size;
+        
+        friend struct ResourceInterface<Buffer>;
+        Buffer(const char *data, size_t size);
+
+    public:
+        Buffer();
+
+        size_t size() const;
+        const char *data() const;
+    };
+
     /// Helper resource class which is defined using a JSON,
     /// which is then deserialized upon loading.
     class JsonResource {};
@@ -471,6 +487,18 @@ namespace dib::res
             [[maybe_unused]] size_t size);
 
         static constexpr bool open_as_text = true;
+    };
+
+    template<> struct ResourceInterface<Buffer>
+    {
+        static void load(
+            [[maybe_unused]] Resources &resources, 
+            [[maybe_unused]] Buffer &instance, 
+            [[maybe_unused]] std::string_view filename, 
+            [[maybe_unused]] const char *buffer, 
+            [[maybe_unused]] size_t size);
+            
+        static constexpr bool free_underlying_once_loaded = false;
     };
 
     template<IsJsonResource T>
